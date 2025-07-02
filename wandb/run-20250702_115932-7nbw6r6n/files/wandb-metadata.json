@@ -1,0 +1,31 @@
+{
+  "os": "Windows-10-10.0.22631-SP0",
+  "python": "CPython 3.10.16",
+  "startedAt": "2025-07-02T07:59:32.280008Z",
+  "program": "d:\\My_folders\\MBZUAI_Internship\\GFN_mRNA\\main.py",
+  "codePath": "main.py",
+  "git": {
+    "remote": "https://github.com/ayalaajil/GFN_for_mRNA_design.git",
+    "commit": "a7dbc215688c15985ce2ebbc3c50fc64621cf255"
+  },
+  "email": "aya.laajil@mbzuai.ac.ae",
+  "root": "D:\\My_folders\\MBZUAI_Internship\\GFN_mRNA",
+  "host": "LAPTOP-PRE7DT01",
+  "executable": "C:\\Users\\ayala\\miniconda3\\envs\\mRNA_env\\python.exe",
+  "codePathLocal": "main.py",
+  "cpu_count": 4,
+  "cpu_count_logical": 8,
+  "disk": {
+    "/": {
+      "total": "359947825152",
+      "used": "53242695680"
+    }
+  },
+  "memory": {
+    "total": "16969424896"
+  },
+  "cpu": {
+    "count": 4,
+    "countLogical": 8
+  }
+}

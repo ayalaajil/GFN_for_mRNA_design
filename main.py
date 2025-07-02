@@ -1,21 +1,24 @@
+from env import CodonDesignEnv
+from preprocessor import CodonSequencePreprocessor
 from train import train
 from evaluate import evaluate
 from plots import plot_training_curves
 from utils import load_config
+
 import torch
 import argparse
 import numpy as np
-import wandb
-from gfn.gflownet import TBGFlowNet
-from gfn.modules import DiscretePolicyEstimator
-from gfn.utils.modules import MLP
-from gfn.samplers import Sampler
-from env2 import CodonDesignEnv
-from preprocessor import CodonSequencePreprocessor
 import matplotlib.pyplot as plt
 import time
 import Levenshtein
 import seaborn as sns
+import wandb
+
+from gfn.gflownet import TBGFlowNet
+from gfn.modules import DiscretePolicyEstimator
+from gfn.utils.modules import MLP
+from gfn.samplers import Sampler
+
 
 def main(args):
 
