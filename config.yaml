@@ -1,0 +1,6 @@
+protein_seq: "VLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHF"
+wandb_project: "mRNA-Conditional-Sequence-design"
+run_name: "mRNA-CondGFN"
+reward: "mfe"           # or "gc", or "multi"
+device: "auto"          
+

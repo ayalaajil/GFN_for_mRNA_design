@@ -1,0 +1,3 @@
+.wandb/
+generated_sequences.txt
+test.ipynb
