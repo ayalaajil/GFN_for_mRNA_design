@@ -1,0 +1,7 @@
+{"time":"2025-07-03T07:39:15.023404738Z","level":"INFO","msg":"stream: starting","core version":"0.19.11","symlink path":"/home/ubuntu/aya/GFN_for_mRNA_design/wandb/run-20250703_073915-gyqmlyyd/logs/debug-core.log"}
+{"time":"2025-07-03T07:39:15.225722767Z","level":"INFO","msg":"created new stream","id":"gyqmlyyd"}
+{"time":"2025-07-03T07:39:15.225753138Z","level":"INFO","msg":"stream: started","id":"gyqmlyyd"}
+{"time":"2025-07-03T07:39:15.225783758Z","level":"INFO","msg":"writer: Do: started","stream_id":"gyqmlyyd"}
+{"time":"2025-07-03T07:39:15.225823709Z","level":"INFO","msg":"sender: started","stream_id":"gyqmlyyd"}
+{"time":"2025-07-03T07:39:15.22592117Z","level":"INFO","msg":"handler: started","stream_id":"gyqmlyyd"}
+{"time":"2025-07-03T07:39:15.412834435Z","level":"INFO","msg":"Starting system monitor"}

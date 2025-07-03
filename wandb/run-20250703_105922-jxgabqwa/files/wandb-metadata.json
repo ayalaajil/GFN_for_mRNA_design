@@ -1,0 +1,42 @@
+{
+  "os": "Linux-6.8.0-40-generic-x86_64-with-glibc2.35",
+  "python": "CPython 3.10.16",
+  "startedAt": "2025-07-03T10:59:22.164783Z",
+  "program": "/home/ubuntu/aya/GFN_for_mRNA_design/main.py",
+  "codePath": "main.py",
+  "git": {
+    "remote": "https://github.com/ayalaajil/GFN_for_mRNA_design.git",
+    "commit": "0437488e1e0bbd655f6423e0838b501888b752f1"
+  },
+  "email": "aya.laajil@mbzuai.ac.ae",
+  "root": "/home/ubuntu/aya/GFN_for_mRNA_design",
+  "host": "joyful-hawking",
+  "executable": "/home/ubuntu/ENTER/envs/mRNA_env/bin/python",
+  "codePathLocal": "main.py",
+  "cpu_count": 28,
+  "cpu_count_logical": 28,
+  "gpu": "NVIDIA A100 80GB PCIe",
+  "gpu_count": 1,
+  "disk": {
+    "/": {
+      "total": "103865303040",
+      "used": "33340010496"
+    }
+  },
+  "memory": {
+    "total": "126710226944"
+  },
+  "cpu": {
+    "count": 28,
+    "countLogical": 28
+  },
+  "gpu_nvidia": [
+    {
+      "name": "NVIDIA A100 80GB PCIe",
+      "memoryTotal": "85899345920",
+      "cudaCores": 6912,
+      "architecture": "Ampere"
+    }
+  ],
+  "cudaVersion": "12.2"
+}

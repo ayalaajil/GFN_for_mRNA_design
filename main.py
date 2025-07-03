@@ -2,7 +2,8 @@ from env import CodonDesignEnv
 from preprocessor import CodonSequencePreprocessor
 from train import train
 from evaluate import evaluate
-from plots import plot_training_curves
+from plots import plot_training_curves, analyze_diversity, plot_metric_histograms, plot_pareto_front
+from datetime import datetime
 from utils import load_config
 
 import torch
@@ -14,15 +15,15 @@ import Levenshtein
 import seaborn as sns
 import wandb
 
-from gfn.gflownet import TBGFlowNet
-from gfn.modules import DiscretePolicyEstimator
-from gfn.utils.modules import MLP
-from gfn.samplers import Sampler
+from torchgfn.src.gfn.gflownet import TBGFlowNet
+from torchgfn.src.gfn.modules import DiscretePolicyEstimator
+from torchgfn.src.gfn.utils.modules import MLP, DiscreteUniform, Tabular
+from torchgfn.src.gfn.samplers import Sampler
 
 
 def main(args):
 
-    device = (torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")) if config.device == "auto" else torch.device(config.device)
+    device = (torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")) 
     
     if args.wandb_project:
 
@@ -66,17 +67,16 @@ def main(args):
 
     # Feed pf to the sampler.
     sampler = Sampler(estimator=pf_estimator)
-    gflownet = gflownet.to(env.device)
-    optimizer = torch.optim.Adam(gflownet.pf_pb_parameters(), lr=args.lr)
 
+    gflownet = gflownet.to(env.device)
+
+    optimizer = torch.optim.Adam(gflownet.pf_pb_parameters(), lr=args.lr)
     optimizer.add_param_group({"params": gflownet.logz_parameters(), "lr": args.lr_logz})
+
     visited_terminating_states = env.states_from_batch_shape((0,))
 
     loss_history = []
     reward_history = []
-    rewards_components = []
-
-    unique_sequences = set()
     
     # Learning rate scheduler
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
@@ -85,15 +85,25 @@ def main(args):
 
     
     loss_history, reward_history, reward_components, unique_seqs = train(
-        args, config, env, gflownet, sampler, optimizer, scheduler
+        args, config, env, gflownet, sampler, optimizer, scheduler, device
     )
 
+    total_time = time.time() - start_time
+
     plot_training_curves(loss_history, reward_components)
+
+    if args.wandb_project:
+        wandb.log({
+            "final_loss": loss_history[-1],
+            "total_training_time": total_time,
+            "final_unique_sequences": len(unique_seqs),
+            "training_curves": wandb.Image("training_curves.png")
+        })
 
     # Sample final sequences
     with torch.no_grad():
 
-        samples, gc_list, mfe_list, cai_list = evaluate(env, sampler, weights=torch.tensor([0.3, 0.3, 0.4]))
+        samples, gc_list, mfe_list, cai_list = evaluate(env, sampler, weights=torch.tensor([0.3, 0.3, 0.4]), n_samples= 100)
 
         # save
         torch.save({
@@ -105,68 +115,38 @@ def main(args):
             }
         }, "trained_gflownet.pth")
 
-        # Plot histograms
-        plt.figure(figsize=(12, 3))
-        plt.subplot(1, 3, 1)
-        plt.hist(gc_list, bins=20, color='green')
-        plt.title('GC Content Distribution')
+        plot_metric_histograms(gc_list, mfe_list, cai_list, out_path="metric_distributions.png")
+        plot_pareto_front(gc_list, mfe_list, cai_list, out_path="pareto_scatter.png")
 
-        plt.subplot(1, 3, 2)
-        plt.hist(mfe_list, bins=20, color='blue')
-        plt.title('MFE Distribution')
-
-        plt.subplot(1, 3, 3)
-        plt.hist(cai_list, bins=20, color='orange')
-        plt.title('CAI Distribution')
-
-        plt.tight_layout()
-        plt.savefig("metric_distributions.png")
-
-        # Plot the Pareto front
-        fig = plt.figure()
-        ax = fig.add_subplot(111, projection='3d')
-        ax.scatter(gc_list, mfe_list, cai_list, alpha=0.6)
-        ax.set_xlabel('GC Content')
-        ax.set_ylabel('MFE')
-        ax.set_zlabel('CAI')
-        plt.savefig("pareto_scatter.png")
 
         # Sort sequences by reward
         sorted_samples = sorted(samples.items(), key=lambda x: x[1][0], reverse=True)
 
-        with open("generated_sequences.txt", "w") as f:
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        filename = f"generated_sequences_{timestamp}.txt"
+
+        with open(filename, "w") as f:
             for i, (seq, reward) in enumerate(sorted_samples):
-                f.write(f"Sequence {i+1}: {seq}, Reward: {reward[0]:.2f}, GC Content: {reward[1][0]:.2f}, MFE: {reward[1][1]:.2f}, CAI: {reward[1][2]:.2f} \n")
-
-
-#################################################################################################################################################################################
-# Diversity analysis of generated sequences 
-#################################################################################################################################################################################
-        
+                f.write(
+                    f"Sequence {i+1}: {seq}, "
+                    f"Reward: {reward[0]:.2f}, "
+                    f"GC Content: {reward[1][0]:.2f}, "
+                    f"MFE: {reward[1][1]:.2f}, "
+                    f"CAI: {reward[1][2]:.2f}\n"
+                )
 
         # Extract top N sequences
         top_n = 30 
         sequences = [seq for seq, _ in sorted_samples[:top_n]]
 
-        distances = []
-        for i in range(len(sequences)):
-            for j in range(i + 1, len(sequences)):
-                d = Levenshtein.distance(sequences[i], sequences[j])
-                distances.append(d)
-
-        # Plot histogram of distances
-        plt.figure(figsize=(6, 4))
-        sns.histplot(distances, bins=20, kde=True)
-        plt.xlabel("Levenshtein Distance")
-        plt.ylabel("Frequency")
-        plt.title(f"Edit Distance Distribution (Top {top_n} sequences)")
-        plt.tight_layout()
-        plt.savefig("edit_distance_distribution.png")
-        plt.close()
+        # Diversity analysis of generated sequences 
+        distances = analyze_diversity(sequences) 
 
         # Wandb logging
         if args.wandb_project:
             wandb.log({
+                "Pareto Plot": wandb.Image('pareto_scatter.png'),
+                "Reward Metric distributions": wandb.Image('metric_distributions.png'),
                 "edit_distance_distribution": wandb.Image("edit_distance_distribution.png"),
                 "mean_edit_distance": np.mean(distances),
                 "std_edit_distance": np.std(distances),

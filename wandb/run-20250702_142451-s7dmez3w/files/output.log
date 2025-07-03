@@ -1,0 +1,16 @@
+Traceback (most recent call last):
+  File "/home/ubuntu/aya/GFN_for_mRNA_design/main.py", line 221, in <module>
+    main(args)
+  File "/home/ubuntu/aya/GFN_for_mRNA_design/main.py", line 40, in main
+    env = CodonDesignEnv(protein_seq=config.protein_seq, device=device)
+  File "/home/ubuntu/aya/GFN_for_mRNA_design/env.py", line 159, in __init__
+    self.device = device
+AttributeError: can't set attribute 'device'
+Traceback (most recent call last):
+  File "/home/ubuntu/aya/GFN_for_mRNA_design/main.py", line 221, in <module>
+    main(args)
+  File "/home/ubuntu/aya/GFN_for_mRNA_design/main.py", line 40, in main
+    env = CodonDesignEnv(protein_seq=config.protein_seq, device=device)
+  File "/home/ubuntu/aya/GFN_for_mRNA_design/env.py", line 159, in __init__
+    self.device = device
+AttributeError: can't set attribute 'device'

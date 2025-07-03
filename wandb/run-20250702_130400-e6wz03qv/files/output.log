@@ -1,0 +1,75 @@
+/home/ubuntu/aya/GFN_for_mRNA_design/torchgfn/src/gfn/env.py:385: UserWarning: You're using advanced parameters: (sf). These are only needed for custom action handling. For basic environments, you can omit these.
+  warnings.warn(
+  0%|                                                                                                                                                                                                    | 0/100 [00:00<?, ?it/s]
+Traceback (most recent call last):
+  File "/home/ubuntu/aya/GFN_for_mRNA_design/main.py", line 226, in <module>
+    main(args)
+  File "/home/ubuntu/aya/GFN_for_mRNA_design/main.py", line 92, in main
+    loss_history, reward_history, reward_components, unique_seqs = train(
+  File "/home/ubuntu/aya/GFN_for_mRNA_design/train.py", line 18, in train
+    trajectories = sampler.sample_trajectories(
+  File "/home/ubuntu/aya/GFN_for_mRNA_design/torchgfn/src/gfn/samplers.py", line 198, in sample_trajectories
+    valid_actions, actions_log_probs, estimator_outputs = self.sample_actions(
+  File "/home/ubuntu/aya/GFN_for_mRNA_design/torchgfn/src/gfn/samplers.py", line 76, in sample_actions
+    estimator_output = self.estimator(states)
+  File "/home/ubuntu/ENTER/envs/mRNA_env/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1751, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/home/ubuntu/ENTER/envs/mRNA_env/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1762, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/ubuntu/aya/GFN_for_mRNA_design/torchgfn/src/gfn/modules.py", line 96, in forward
+    return self.module(out)
+  File "/home/ubuntu/ENTER/envs/mRNA_env/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1751, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/home/ubuntu/ENTER/envs/mRNA_env/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1762, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/ubuntu/aya/GFN_for_mRNA_design/torchgfn/src/gfn/utils/modules.py", line 93, in forward
+    out = self.trunk(preprocessed_states)
+  File "/home/ubuntu/ENTER/envs/mRNA_env/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1751, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/home/ubuntu/ENTER/envs/mRNA_env/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1762, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/ubuntu/ENTER/envs/mRNA_env/lib/python3.10/site-packages/torch/nn/modules/container.py", line 240, in forward
+    input = module(input)
+  File "/home/ubuntu/ENTER/envs/mRNA_env/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1751, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/home/ubuntu/ENTER/envs/mRNA_env/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1762, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/ubuntu/ENTER/envs/mRNA_env/lib/python3.10/site-packages/torch/nn/modules/linear.py", line 125, in forward
+    return F.linear(input, self.weight, self.bias)
+RuntimeError: Expected all tensors to be on the same device, but found at least two devices, cuda:0 and cpu! (when checking argument for argument mat1 in method wrapper_CUDA_addmm)
+Traceback (most recent call last):
+  File "/home/ubuntu/aya/GFN_for_mRNA_design/main.py", line 226, in <module>
+    main(args)
+  File "/home/ubuntu/aya/GFN_for_mRNA_design/main.py", line 92, in main
+    loss_history, reward_history, reward_components, unique_seqs = train(
+  File "/home/ubuntu/aya/GFN_for_mRNA_design/train.py", line 18, in train
+    trajectories = sampler.sample_trajectories(
+  File "/home/ubuntu/aya/GFN_for_mRNA_design/torchgfn/src/gfn/samplers.py", line 198, in sample_trajectories
+    valid_actions, actions_log_probs, estimator_outputs = self.sample_actions(
+  File "/home/ubuntu/aya/GFN_for_mRNA_design/torchgfn/src/gfn/samplers.py", line 76, in sample_actions
+    estimator_output = self.estimator(states)
+  File "/home/ubuntu/ENTER/envs/mRNA_env/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1751, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/home/ubuntu/ENTER/envs/mRNA_env/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1762, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/ubuntu/aya/GFN_for_mRNA_design/torchgfn/src/gfn/modules.py", line 96, in forward
+    return self.module(out)
+  File "/home/ubuntu/ENTER/envs/mRNA_env/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1751, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/home/ubuntu/ENTER/envs/mRNA_env/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1762, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/ubuntu/aya/GFN_for_mRNA_design/torchgfn/src/gfn/utils/modules.py", line 93, in forward
+    out = self.trunk(preprocessed_states)
+  File "/home/ubuntu/ENTER/envs/mRNA_env/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1751, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/home/ubuntu/ENTER/envs/mRNA_env/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1762, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/ubuntu/ENTER/envs/mRNA_env/lib/python3.10/site-packages/torch/nn/modules/container.py", line 240, in forward
+    input = module(input)
+  File "/home/ubuntu/ENTER/envs/mRNA_env/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1751, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/home/ubuntu/ENTER/envs/mRNA_env/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1762, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/ubuntu/ENTER/envs/mRNA_env/lib/python3.10/site-packages/torch/nn/modules/linear.py", line 125, in forward
+    return F.linear(input, self.weight, self.bias)
+RuntimeError: Expected all tensors to be on the same device, but found at least two devices, cuda:0 and cpu! (when checking argument for argument mat1 in method wrapper_CUDA_addmm)

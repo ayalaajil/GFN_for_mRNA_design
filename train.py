@@ -1,9 +1,10 @@
 import numpy as np
 from tqdm import tqdm
 from utils import compute_reward
+import wandb
+import time
 
-
-def train(args, config, env, gflownet, sampler, optimizer, scheduler):
+def train(args, config, env, gflownet, sampler, optimizer, scheduler, device):
 
     loss_history = []
     reward_history = []
@@ -11,6 +12,8 @@ def train(args, config, env, gflownet, sampler, optimizer, scheduler):
     unique_sequences = set()
 
     for it in (pbar := tqdm(range(args.n_iterations), dynamic_ncols=True)):
+
+        iter_start_time = time.time()
 
         weights = np.random.dirichlet([1, 1, 1])
         env.set_weights(weights)
@@ -26,11 +29,15 @@ def train(args, config, env, gflownet, sampler, optimizer, scheduler):
         optimizer.step()
         scheduler.step(loss)
 
+        iter_time = time.time() - iter_start_time
+
         # Logging rewards
-        final_states = trajectories.terminating_states.tensor
+        final_states = trajectories.terminating_states.tensor.to(device)
         rewards, components = [], []
 
         for state in final_states:
+
+            state = state.to(device)
 
             r, c = compute_reward(state, env.codon_gc_counts, env.weights)
             rewards.append(r)

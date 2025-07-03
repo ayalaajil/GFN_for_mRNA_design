@@ -1,9 +1,76 @@
-from env import to_mRNA_string
 from MFE_calculator import RNAFolder
 from CAI_calculator import CAICalculator
 import torch
 import yaml
+import string
 from types import SimpleNamespace
+from typing import List, Dict
+
+# --- Biological Constants ---
+
+# Stop codons
+STOP_CODONS: List[str] = ["UAA", "UAG", "UGA"]
+
+# Codon table mapping amino acids (or stop *) to codons, example of protein sequence : ACDEFGHIKLMNPQ
+CODON_TABLE : Dict[str, List[str]] = {
+    'A': ['GCU', 'GCC', 'GCA', 'GCG'],
+    'C': ['UGU', 'UGC'],
+    'D': ['GAU', 'GAC'],
+    'E': ['GAA', 'GAG'],
+    'F': ['UUU', 'UUC'],
+    'G': ['GGU', 'GGC', 'GGA', 'GGG'],
+    'H': ['CAU', 'CAC'],
+    'I': ['AUU', 'AUC', 'AUA'],
+    'K': ['AAA', 'AAG'],
+    'L': ['UUA', 'UUG', 'CUU', 'CUC', 'CUA', 'CUG'],
+    'M': ['AUG'],
+    'N': ['AAU', 'AAC'],
+    'P': ['CCU', 'CCC', 'CCA', 'CCG'],
+    'Q': ['CAA', 'CAG'],
+    'R': ['CGU', 'CGC', 'CGA', 'CGG', 'AGA', 'AGG'],
+    'S': ['UCU', 'UCC', 'UCA', 'UCG', 'AGU', 'AGC'],
+    'T': ['ACU', 'ACC', 'ACA', 'ACG'],
+    'V': ['GUU', 'GUC', 'GUA', 'GUG'],
+    'W': ['UGG'],
+    'Y': ['UAU', 'UAC'],
+    '*': ['UAA', 'UAG', 'UGA'],  # Stop codons
+}
+
+
+# Amino acid list 
+AA_LIST: List[str] = list(CODON_TABLE.keys())
+ALL_CODONS: List[str] = sorted(list(set(c for codons in CODON_TABLE.values() for c in codons)))
+N_CODONS: int = len(ALL_CODONS)
+CODON_TO_IDX: Dict[str, int] = {codon: idx for idx, codon in enumerate(ALL_CODONS)}
+IDX_TO_CODON: Dict[int, str] = {idx: codon for codon, idx in CODON_TO_IDX.items()}
+
+# --- Utility Functions ---
+def get_synonymous_indices(amino_acid: str) -> List[int]:
+    """
+    Return the list of global codon indices that encode the given amino acid.
+    Handles standard amino acids and '*'.
+    """
+    codons = CODON_TABLE.get(amino_acid, [])
+    return [CODON_TO_IDX[c] for c in codons]
+
+def mRNA_string_to_tensor(rna: string):
+
+    rna_index = []
+    for i in range(0,len(rna)-3,3):
+        index = CODON_TO_IDX[rna[i:i+3]]
+        rna_index.append(index)
+    
+    rna_tensor = torch.tensor(rna_index)
+    return rna_tensor
+
+def to_mRNA_string(rna_tensor : torch.Tensor):
+
+    rna_string = ''
+    for i in range(0,len(rna_tensor)):
+        cd = IDX_TO_CODON[rna_tensor[i].item()]
+        rna_string += cd
+
+    return rna_string 
 
 def load_config(path: str):
     with open(path, "r") as f:
@@ -15,16 +82,18 @@ def compute_gc_content_vectorized(indices: torch.LongTensor, codon_gc_counts: to
     """
     Vectorized GC content calculation using precomputed codon GC counts
     """
+    device = indices.device
     gc_counts = codon_gc_counts[indices].sum(dim=0)
     total_nucleotides = indices.shape[0] * 3
     gc_content = gc_counts / total_nucleotides * 100
 
-    return gc_content
+    return gc_content.to(device)
 
 def compute_mfe_energy(indices: torch.LongTensor, energies=None, loop_min=4) -> torch.FloatTensor:
     """
     Compute the minimum free energy (MFE) of an RNA sequence using Zucker Algorithm.
     """
+    device = indices.device
     mfe_energies = []
     rna_str = to_mRNA_string(indices)
     try:
@@ -36,10 +105,12 @@ def compute_mfe_energy(indices: torch.LongTensor, energies=None, loop_min=4) -> 
             energy = float('inf')
 
     mfe_energies.append(energy)
-    return torch.tensor(mfe_energies, dtype=torch.float32)
+    return torch.tensor(mfe_energies, dtype=torch.float32).to(device)
 
 
 def compute_cai(indices: torch.LongTensor, energies=None, loop_min=4) -> torch.FloatTensor:
+
+    device = indices.device
     cai_scores = []
     rna_str = to_mRNA_string(indices)
     try:
@@ -49,7 +120,7 @@ def compute_cai(indices: torch.LongTensor, energies=None, loop_min=4) -> torch.F
             print(f"CAI computation failed for: {rna_str}, error: {e}")
             score = float('inf')
     cai_scores.append(score)
-    return torch.tensor(cai_scores, dtype=torch.float32)
+    return torch.tensor(cai_scores, dtype=torch.float32).to(device)
 
 def compute_reward_components(state, codon_gc_counts):
     gc_content = compute_gc_content_vectorized(state, codon_gc_counts).item()

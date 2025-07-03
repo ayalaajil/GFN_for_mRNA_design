@@ -1,0 +1,31 @@
+/home/ubuntu/aya/GFN_for_mRNA_design/torchgfn/src/gfn/env.py:385: UserWarning: You're using advanced parameters: (sf). These are only needed for custom action handling. For basic environments, you can omit these.
+  warnings.warn(
+  0%|                                                                                                                                                                                                    | 0/100 [00:00<?, ?it/s]
+Traceback (most recent call last):
+  File "/home/ubuntu/aya/GFN_for_mRNA_design/main.py", line 221, in <module>
+    main(args)
+  File "/home/ubuntu/aya/GFN_for_mRNA_design/main.py", line 87, in main
+    loss_history, reward_history, reward_components, unique_seqs = train(
+  File "/home/ubuntu/aya/GFN_for_mRNA_design/train.py", line 18, in train
+    trajectories = sampler.sample_trajectories(
+  File "/home/ubuntu/aya/GFN_for_mRNA_design/torchgfn/src/gfn/samplers.py", line 262, in sample_trajectories
+    trajectories_log_rewards[new_dones] = env.log_reward(states[new_dones])
+  File "/home/ubuntu/aya/GFN_for_mRNA_design/torchgfn/src/gfn/env.py", line 322, in log_reward
+    return torch.log(self.reward(final_states))
+  File "/home/ubuntu/aya/GFN_for_mRNA_design/env.py", line 283, in reward
+    reward_components = torch.stack([gc_percent, -mfe_energy, cai_score], dim=-1)  # shape: (batch, 3)
+RuntimeError: Expected all tensors to be on the same device, but found at least two devices, cuda:0 and cpu! (when checking argument for argument tensors in method wrapper_CUDA_cat)
+Traceback (most recent call last):
+  File "/home/ubuntu/aya/GFN_for_mRNA_design/main.py", line 221, in <module>
+    main(args)
+  File "/home/ubuntu/aya/GFN_for_mRNA_design/main.py", line 87, in main
+    loss_history, reward_history, reward_components, unique_seqs = train(
+  File "/home/ubuntu/aya/GFN_for_mRNA_design/train.py", line 18, in train
+    trajectories = sampler.sample_trajectories(
+  File "/home/ubuntu/aya/GFN_for_mRNA_design/torchgfn/src/gfn/samplers.py", line 262, in sample_trajectories
+    trajectories_log_rewards[new_dones] = env.log_reward(states[new_dones])
+  File "/home/ubuntu/aya/GFN_for_mRNA_design/torchgfn/src/gfn/env.py", line 322, in log_reward
+    return torch.log(self.reward(final_states))
+  File "/home/ubuntu/aya/GFN_for_mRNA_design/env.py", line 283, in reward
+    reward_components = torch.stack([gc_percent, -mfe_energy, cai_score], dim=-1)  # shape: (batch, 3)
+RuntimeError: Expected all tensors to be on the same device, but found at least two devices, cuda:0 and cpu! (when checking argument for argument tensors in method wrapper_CUDA_cat)
