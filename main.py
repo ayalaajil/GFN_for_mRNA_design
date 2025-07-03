@@ -123,7 +123,7 @@ def main(args):
         sorted_samples = sorted(samples.items(), key=lambda x: x[1][0], reverse=True)
 
         timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        filename = f"generated_sequences_{timestamp}.txt"
+        filename = f"outputs/generated_sequences_{timestamp}.txt"
 
         with open(filename, "w") as f:
             for i, (seq, reward) in enumerate(sorted_samples):
