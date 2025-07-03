@@ -5,7 +5,7 @@ from evaluate import evaluate
 from plots import plot_training_curves, analyze_diversity, plot_metric_histograms, plot_pareto_front
 from datetime import datetime
 from utils import load_config
-
+import logging
 import torch
 import argparse
 import numpy as np
@@ -21,11 +21,21 @@ from torchgfn.src.gfn.utils.modules import MLP, DiscreteUniform, Tabular
 from torchgfn.src.gfn.samplers import Sampler
 
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+
 def main(args):
 
     device = (torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")) 
-    
+    logging.info(f"Using device: {device}")
+
+
     if args.wandb_project:
+
+        logging.info("Initializing Weights & Biases...")
 
         wandb.init(
             project=config.wandb_project,
@@ -37,9 +47,12 @@ def main(args):
     start_time = time.time()
 
     # 1. Create the environment.
+
+    logging.info("Creating environment...")
     env = CodonDesignEnv(protein_seq=config.protein_seq, device=device)   
     preprocessor = CodonSequencePreprocessor(env.seq_length, embedding_dim=args.embedding_dim, device=device)   
 
+    logging.info("Building GFlowNet model...")
     # Build the GFlowNet.
     module_PF = MLP(
         input_dim=preprocessor.output_dim,
@@ -67,7 +80,6 @@ def main(args):
 
     # Feed pf to the sampler.
     sampler = Sampler(estimator=pf_estimator)
-
     gflownet = gflownet.to(env.device)
 
     optimizer = torch.optim.Adam(gflownet.pf_pb_parameters(), lr=args.lr)
@@ -83,6 +95,9 @@ def main(args):
         optimizer, mode='min', factor=0.5, patience=args.lr_patience
     )
 
+    logging.info("Starting training loop...")
+
+    start_time = time.time()
     
     loss_history, reward_history, reward_components, unique_seqs = train(
         args, config, env, gflownet, sampler, optimizer, scheduler, device
@@ -90,9 +105,13 @@ def main(args):
 
     total_time = time.time() - start_time
 
+    logging.info(f"Training completed in {total_time:.2f} seconds.")
+
     plot_training_curves(loss_history, reward_components)
 
     if args.wandb_project:
+
+        logging.info("Logging training summary to WandB...")
         wandb.log({
             "final_loss": loss_history[-1],
             "total_training_time": total_time,
@@ -100,13 +119,17 @@ def main(args):
             "training_curves": wandb.Image("training_curves.png")
         })
 
+
+    logging.info("Evaluating final model on sampled sequences...")
+
     # Sample final sequences
     with torch.no_grad():
 
         samples, gc_list, mfe_list, cai_list = evaluate(env, sampler, weights=torch.tensor([0.3, 0.3, 0.4]), n_samples= 100)
 
-        # save
-        torch.save({
+    
+    logging.info("Saving trained model and metrics...")
+    torch.save({
             'model_state': gflownet.state_dict(),
             'logZ': gflownet.logZ,
             'training_history': {
@@ -115,17 +138,20 @@ def main(args):
             }
         }, "trained_gflownet.pth")
 
-        plot_metric_histograms(gc_list, mfe_list, cai_list, out_path="metric_distributions.png")
-        plot_pareto_front(gc_list, mfe_list, cai_list, out_path="pareto_scatter.png")
+    
+    logging.info("Plotting final metric histograms and Pareto front...")
+
+    plot_metric_histograms(gc_list, mfe_list, cai_list, out_path="metric_distributions.png")
+    plot_pareto_front(gc_list, mfe_list, cai_list, out_path="pareto_scatter.png")
 
 
-        # Sort sequences by reward
-        sorted_samples = sorted(samples.items(), key=lambda x: x[1][0], reverse=True)
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    filename = f"outputs/generated_sequences_{timestamp}.txt"
+    logging.info(f"Saving generated sequences to {filename}")
+    sorted_samples = sorted(samples.items(), key=lambda x: x[1][0], reverse=True)
 
-        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        filename = f"outputs/generated_sequences_{timestamp}.txt"
-
-        with open(filename, "w") as f:
+    
+    with open(filename, "w") as f:
             for i, (seq, reward) in enumerate(sorted_samples):
                 f.write(
                     f"Sequence {i+1}: {seq}, "
@@ -135,22 +161,40 @@ def main(args):
                     f"CAI: {reward[1][2]:.2f}\n"
                 )
 
-        # Extract top N sequences
-        top_n = 30 
-        sequences = [seq for seq, _ in sorted_samples[:top_n]]
 
-        # Diversity analysis of generated sequences 
-        distances = analyze_diversity(sequences) 
+    table = wandb.Table(columns=["Index", "Sequence", "Reward", "GC Content", "MFE", "CAI"])
+
+    for i, (seq, reward) in enumerate(sorted_samples[:30]):
+        table.add_data(i + 1, seq, reward[0], reward[1][0], reward[1][1], reward[1][2])
+
+    wandb.log({"Top_Sequences": table})
+
+
+    # Extract top N sequences
+    top_n = 30 
+    sequences = [seq for seq, _ in sorted_samples[:top_n]]
+
+    # Diversity analysis of generated sequences 
+    distances = analyze_diversity(sequences) 
 
         # Wandb logging
-        if args.wandb_project:
-            wandb.log({
+    if args.wandb_project:
+
+        logging.info("Logging evaluation metrics to WandB...")
+        wandb.log({
                 "Pareto Plot": wandb.Image('pareto_scatter.png'),
                 "Reward Metric distributions": wandb.Image('metric_distributions.png'),
                 "edit_distance_distribution": wandb.Image("edit_distance_distribution.png"),
                 "mean_edit_distance": np.mean(distances),
                 "std_edit_distance": np.std(distances),
             })
+
+    wandb.run.summary["final_loss"] = loss_history[-1]
+    wandb.run.summary["total_training_time"] = total_time
+    wandb.run.summary["unique_sequences"] = len(unique_seqs)
+    wandb.run.summary["mean_edit_distance"] = np.mean(distances)
+    wandb.run.summary["std_edit_distance"] = np.std(distances)
+
 
 
 if __name__ == "__main__":
@@ -197,6 +241,10 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
     config = load_config(args.config_path)
+
+    logging.info(f"Loaded config from {args.config_path}")
+    logging.info(f"Training config: {config}")
+    logging.info(f"Run arguments: {args}")
 
     main(args)
 

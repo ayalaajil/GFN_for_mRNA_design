@@ -1,0 +1,15 @@
+{"time":"2025-07-03T14:35:39.644272165Z","level":"INFO","msg":"stream: starting","core version":"0.19.11","symlink path":"/home/ubuntu/aya/GFN_for_mRNA_design/wandb/run-20250703_143539-kl6n0g1i/logs/debug-core.log"}
+{"time":"2025-07-03T14:35:39.836259318Z","level":"INFO","msg":"created new stream","id":"kl6n0g1i"}
+{"time":"2025-07-03T14:35:39.836307769Z","level":"INFO","msg":"stream: started","id":"kl6n0g1i"}
+{"time":"2025-07-03T14:35:39.83640209Z","level":"INFO","msg":"sender: started","stream_id":"kl6n0g1i"}
+{"time":"2025-07-03T14:35:39.836476111Z","level":"INFO","msg":"handler: started","stream_id":"kl6n0g1i"}
+{"time":"2025-07-03T14:35:39.83639344Z","level":"INFO","msg":"writer: Do: started","stream_id":"kl6n0g1i"}
+{"time":"2025-07-03T14:35:40.022388442Z","level":"INFO","msg":"Starting system monitor"}
+{"time":"2025-07-03T15:01:18.98454054Z","level":"INFO","msg":"stream: closing","id":"kl6n0g1i"}
+{"time":"2025-07-03T15:01:18.98457432Z","level":"INFO","msg":"Stopping system monitor"}
+{"time":"2025-07-03T15:01:18.984616441Z","level":"INFO","msg":"Stopped system monitor"}
+{"time":"2025-07-03T15:01:19.343561041Z","level":"INFO","msg":"fileTransfer: Close: file transfer manager closed"}
+{"time":"2025-07-03T15:01:19.504888857Z","level":"INFO","msg":"handler: closed","stream_id":"kl6n0g1i"}
+{"time":"2025-07-03T15:01:19.504927467Z","level":"INFO","msg":"writer: Close: closed","stream_id":"kl6n0g1i"}
+{"time":"2025-07-03T15:01:19.504961478Z","level":"INFO","msg":"sender: closed","stream_id":"kl6n0g1i"}
+{"time":"2025-07-03T15:01:19.505022788Z","level":"INFO","msg":"stream: closed","id":"kl6n0g1i"}

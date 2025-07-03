@@ -39,7 +39,7 @@ def train(args, config, env, gflownet, sampler, optimizer, scheduler, device):
 
             state = state.to(device)
 
-            r, c = compute_reward(state, env.codon_gc_counts, env.weights)
+            r, c = compute_reward(state, env.codon_gc_counts, env.weights)   #(gc, mfe, cai)
             rewards.append(r)
             components.append(c)
 
@@ -50,5 +50,13 @@ def train(args, config, env, gflownet, sampler, optimizer, scheduler, device):
         reward_history.append(avg_reward)
         reward_components_history.extend(components)
         loss_history.append(loss.item())
+
+        if it % 10 == 0:
+            wandb.log({
+                "iteration": it,
+                "loss": loss.item(),
+                "avg_reward": avg_reward
+            })
+
 
     return loss_history, reward_history, reward_components_history, unique_sequences

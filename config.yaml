@@ -1,6 +1,6 @@
 protein_seq: "MATGGRRGAAAAPLLVAVAALLLGAAGHLYPGEVCPGMDIRNNLTRLHELENCSVIEGHLQILLMFKTRPEDFRDLSFPKLIMITDYLLLFRVYGLESLKDLFPNLTV"
-wandb_project: "mRNA-Conditional-Long-Sequence-design"
-run_name: "mRNA-CondGFN-design"
+wandb_project: "mRNA-CondGFN-Long-Sequence-design"
+run_name: "100-AA-seq-INSR-Insulin"
 device: "cuda"          
 
 

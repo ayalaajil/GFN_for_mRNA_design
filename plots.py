@@ -32,8 +32,6 @@ def plot_training_curves(loss_history, reward_components, out_path="training_cur
     plt.tight_layout(rect=[0, 0.03, 1, 0.95])  
     plt.savefig(out_path, dpi=300) 
     plt.close()
-      
-    wandb.log({"Training Curves": wandb.Image(out_path)})
 
 
 def plot_metric_histograms(gc_list, mfe_list, cai_list, out_path="metric_distributions.png"):
