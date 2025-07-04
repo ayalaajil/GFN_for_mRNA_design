@@ -165,6 +165,7 @@ def main(args):
     table = wandb.Table(columns=["Index", "Sequence", "Reward", "GC Content", "MFE", "CAI"])
 
     for i, (seq, reward) in enumerate(sorted_samples[:30]):
+
         table.add_data(i + 1, seq, reward[0], reward[1][0], reward[1][1], reward[1][2])
 
     wandb.log({"Top_Sequences": table})
@@ -215,7 +216,7 @@ if __name__ == "__main__":
         help="Learning rate for the logZ parameter",
     )
     parser.add_argument(
-        "--n_iterations", type=int, default=100, help="Number of iterations"
+        "--n_iterations", type=int, default=200, help="Number of iterations"
     )
     parser.add_argument("--batch_size", type=int, default=2, help="Batch size")
     parser.add_argument(
