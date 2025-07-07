@@ -4,7 +4,7 @@ from train import train
 from evaluate import evaluate
 from plots import plot_training_curves, analyze_diversity, plot_metric_histograms, plot_pareto_front
 from datetime import datetime
-from utils import load_config
+from utils import load_config, tokenize_sequence_to_tensor
 import logging
 import torch
 import argparse
@@ -14,7 +14,7 @@ import time
 import Levenshtein
 import seaborn as sns
 import wandb
-
+from comparison import analyze_sequence_properties
 from torchgfn.src.gfn.gflownet import TBGFlowNet
 from torchgfn.src.gfn.modules import DiscretePolicyEstimator
 from torchgfn.src.gfn.utils.modules import MLP, DiscreteUniform, Tabular
@@ -85,8 +85,6 @@ def main(args):
     optimizer = torch.optim.Adam(gflownet.pf_pb_parameters(), lr=args.lr)
     optimizer.add_param_group({"params": gflownet.logz_parameters(), "lr": args.lr_logz})
 
-    visited_terminating_states = env.states_from_batch_shape((0,))
-
     loss_history = []
     reward_history = []
     
@@ -125,7 +123,7 @@ def main(args):
     # Sample final sequences
     with torch.no_grad():
 
-        samples, gc_list, mfe_list, cai_list = evaluate(env, sampler, weights=torch.tensor([0.3, 0.3, 0.4]), n_samples= 100)
+        samples, gc_list, mfe_list, cai_list = evaluate(env, sampler, weights=torch.tensor([0.3, 0.3, 0.4]), n_samples= 50)
 
     
     logging.info("Saving trained model and metrics...")
@@ -147,10 +145,18 @@ def main(args):
 
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     filename = f"outputs/generated_sequences_{timestamp}.txt"
+
     logging.info(f"Saving generated sequences to {filename}")
+
     sorted_samples = sorted(samples.items(), key=lambda x: x[1][0], reverse=True)
 
-    
+    ######################### Extract Best-by-Objective Sequences ##############################
+
+    # Get best sequences for each reward component
+    best_gc = max(samples.items(), key=lambda x: x[1][1][0])   # GC content
+    best_mfe = max(samples.items(), key=lambda x: x[1][1][1])  # MFE
+    best_cai = max(samples.items(), key=lambda x: x[1][1][2])  # CAI
+
     with open(filename, "w") as f:
             for i, (seq, reward) in enumerate(sorted_samples):
                 f.write(
@@ -161,24 +167,49 @@ def main(args):
                     f"CAI: {reward[1][2]:.2f}\n"
                 )
 
+    table = wandb.Table(columns=["Index", "Sequence", "Reward", "GC Content", "MFE", "CAI", "Label"])
 
-    table = wandb.Table(columns=["Index", "Sequence", "Reward", "GC Content", "MFE", "CAI"])
 
     for i, (seq, reward) in enumerate(sorted_samples[:30]):
+        table.add_data(i + 1, seq, reward[0].item(), reward[1][0], reward[1][1], reward[1][2], "Pareto Optimal")
 
-        table.add_data(i + 1, seq, reward[0], reward[1][0], reward[1][1], reward[1][2])
+    # Add best-by-objective to the table
+    table.add_data(31, best_gc[0], best_gc[1][0].item(), best_gc[1][1][0], best_gc[1][1][1], best_gc[1][1][2], "Best GC")
+    table.add_data(32, best_mfe[0], best_mfe[1][0].item(), best_mfe[1][1][0], best_mfe[1][1][1], best_mfe[1][1][2], "Best MFE")
+    table.add_data(33, best_cai[0], best_cai[1][0].item(), best_cai[1][1][0], best_cai[1][1][1], best_cai[1][1][2], "Best CAI")
 
     wandb.log({"Top_Sequences": table})
 
 
     # Extract top N sequences
-    top_n = 30 
+    top_n = 15
     sequences = [seq for seq, _ in sorted_samples[:top_n]]
 
     # Diversity analysis of generated sequences 
     distances = analyze_diversity(sequences) 
 
-        # Wandb logging
+    generated_sequences_tensor = [
+        tokenize_sequence_to_tensor(seq)
+        for seq in sequences
+    ]
+
+    # Add best-by-objective sequences to generated tensor list for comparison
+    additional_best_seqs = [best_gc[0], best_mfe[0], best_cai[0]]
+
+    for s in additional_best_seqs:
+        generated_sequences_tensor.append(tokenize_sequence_to_tensor(s))
+
+    natural_tensor = tokenize_sequence_to_tensor(config.natural_mRNA_seq)
+    sequence_labels = [f"Gen {i+1}" for i in range(top_n)] + ["Best GC", "Best MFE", "Best CAI"]
+
+    analyze_sequence_properties(
+        generated_sequences_tensor,
+        natural_tensor,
+        labels=sequence_labels
+    )
+
+
+    # Wandb logging
     if args.wandb_project:
 
         logging.info("Logging evaluation metrics to WandB...")
@@ -202,42 +233,24 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--no_cuda", action="store_true", help="Prevent CUDA usage")
-    parser.add_argument("--seed", type=int, default=0, help="Random seed")
-    parser.add_argument(
-        "--lr",
-        type=float,
-        default=1e-3,
-        help="Learning rate for the estimators' modules",
-    )
-    parser.add_argument(
-        "--lr_logz",
-        type=float,
-        default=1e-1,
-        help="Learning rate for the logZ parameter",
-    )
-    parser.add_argument(
-        "--n_iterations", type=int, default=200, help="Number of iterations"
-    )
+    parser.add_argument("--seed", type=int, default=42, help="Random seed")
+    parser.add_argument("--lr",type=float,default=1e-3,help="Learning rate for the estimators' modules")
+    parser.add_argument("--lr_logz",type=float,default=1e-1,help="Learning rate for the logZ parameter")
+    parser.add_argument("--n_iterations", type=int, default=200, help="Number of iterations")
     parser.add_argument("--batch_size", type=int, default=2, help="Batch size")
-    parser.add_argument(
-        "--epsilon", type=float, default=0.1, help="Epsilon for the sampler"
-    )
+    parser.add_argument("--epsilon", type=float, default=0.1, help="Epsilon for the sampler")
     
-    # New arguments for model architecture
     parser.add_argument("--embedding_dim", type=int, default=32, help="Dimension of codon embeddings")
     parser.add_argument("--hidden_dim", type=int, default=256, help="Hidden dimension of the networks")
     parser.add_argument("--n_hidden", type=int, default=2, help="Number of hidden layers")
     parser.add_argument("--tied", action="store_true", help="Whether to tie the parameters of PF and PB")
     
-    # Training optimization arguments
     parser.add_argument("--clip_grad_norm", type=float, default=1.0, help="Gradient clipping norm")
     parser.add_argument("--lr_patience", type=int, default=10, help="Patience for learning rate scheduler")
     
-    # Wandb arguments
     parser.add_argument("--wandb_project", type=str, default="mRNA_design", help="Weights & Biases project name")
     parser.add_argument("--run_name", type=str, default="", help="Name for the wandb run")
 
-    # config 
     parser.add_argument('--config_path', type=str, default="config.yaml")
 
     args = parser.parse_args()

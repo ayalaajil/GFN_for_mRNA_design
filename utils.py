@@ -44,6 +44,22 @@ N_CODONS: int = len(ALL_CODONS)
 CODON_TO_IDX: Dict[str, int] = {codon: idx for idx, codon in enumerate(ALL_CODONS)}
 IDX_TO_CODON: Dict[int, str] = {idx: codon for codon, idx in CODON_TO_IDX.items()}
 
+
+codon_gc_counts = torch.tensor([
+            codon.count('G') + codon.count('C') for codon in ALL_CODONS
+        ], dtype=torch.float)
+
+
+# -- Helper: Tokenize codon string to LongTensor
+def tokenize_sequence_to_tensor(seq):
+    codons = [seq[i:i+3] for i in range(0, len(seq), 3)]
+    indices = [CODON_TO_IDX[c] for c in codons if c in CODON_TO_IDX]
+    return torch.tensor(indices, dtype=torch.long)
+
+def decode_sequence(tensor_seq):
+    return ''.join([IDX_TO_CODON[int(i)] for i in tensor_seq])
+
+
 # --- Utility Functions ---
 def get_synonymous_indices(amino_acid: str) -> List[int]:
     """
