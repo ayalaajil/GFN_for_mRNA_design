@@ -2,7 +2,7 @@ from env import CodonDesignEnv
 from preprocessor import CodonSequencePreprocessor
 from train import train
 from evaluate import evaluate
-from plots import plot_training_curves, analyze_diversity, plot_metric_histograms, plot_pareto_front
+from plots import plot_training_curves, analyze_diversity, plot_metric_histograms, plot_pareto_front, plot_cai_vs_mfe, plot_gc_vs_mfe
 from datetime import datetime
 from utils import load_config, tokenize_sequence_to_tensor
 import logging
@@ -19,6 +19,10 @@ from torchgfn.src.gfn.gflownet import TBGFlowNet
 from torchgfn.src.gfn.modules import DiscretePolicyEstimator
 from torchgfn.src.gfn.utils.modules import MLP, DiscreteUniform, Tabular
 from torchgfn.src.gfn.samplers import Sampler
+
+import os
+import pandas as pd
+import pygmo as pg
 
 
 logging.basicConfig(
@@ -120,13 +124,24 @@ def main(args):
 
     logging.info("Evaluating final model on sampled sequences...")
 
+    start_inference_time = time.time()
+
+    n_samples= 100
+
     # Sample final sequences
     with torch.no_grad():
 
-        samples, gc_list, mfe_list, cai_list = evaluate(env, sampler, weights=torch.tensor([0.3, 0.3, 0.4]), n_samples= 50)
+        samples, gc_list, mfe_list, cai_list = evaluate(env, sampler, weights=torch.tensor([0.3, 0.3, 0.4]), n_samples= n_samples)
 
-    
+    inference_time = time.time() - start_inference_time
+    avg_time_per_seq = inference_time / n_samples
+
+    logging.info(f"Inference (sampling) completed in {inference_time:.2f} seconds.")
+    logging.info(f"Average time per generated sequence is {avg_time_per_seq:.2f} seconds.")
+
+
     logging.info("Saving trained model and metrics...")
+
     torch.save({
             'model_state': gflownet.state_dict(),
             'logZ': gflownet.logZ,
@@ -141,6 +156,8 @@ def main(args):
 
     plot_metric_histograms(gc_list, mfe_list, cai_list, out_path="metric_distributions.png")
     plot_pareto_front(gc_list, mfe_list, cai_list, out_path="pareto_scatter.png")
+    plot_cai_vs_mfe(cai_list, mfe_list, out_path="cai_vs_mfe.png")
+    plot_gc_vs_mfe(gc_list, mfe_list, out_path="gc_vs_mfe.png")
 
 
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
@@ -154,7 +171,7 @@ def main(args):
 
     # Get best sequences for each reward component
     best_gc = max(samples.items(), key=lambda x: x[1][1][0])   # GC content
-    best_mfe = max(samples.items(), key=lambda x: x[1][1][1])  # MFE
+    best_mfe = min(samples.items(), key=lambda x: x[1][1][1])  # MFE
     best_cai = max(samples.items(), key=lambda x: x[1][1][2])  # CAI
 
     with open(filename, "w") as f:
@@ -182,7 +199,7 @@ def main(args):
 
 
     # Extract top N sequences
-    top_n = 15
+    top_n = 20    
     sequences = [seq for seq, _ in sorted_samples[:top_n]]
 
     # Diversity analysis of generated sequences 
@@ -215,34 +232,129 @@ def main(args):
         logging.info("Logging evaluation metrics to WandB...")
         wandb.log({
                 "Pareto Plot": wandb.Image('pareto_scatter.png'),
+                "Training_time" : total_time,
+                "Inference_time": inference_time,
+                "Avg_time_per_sequence": avg_time_per_seq,
                 "Reward Metric distributions": wandb.Image('metric_distributions.png'),
                 "edit_distance_distribution": wandb.Image("edit_distance_distribution.png"),
+                "CAI vs MFE": wandb.Image("cai_vs_mfe.png"),
+                "GC vs MFE": wandb.Image("gc_vs_mfe.png"),
                 "mean_edit_distance": np.mean(distances),
                 "std_edit_distance": np.std(distances),
+
             })
 
     wandb.run.summary["final_loss"] = loss_history[-1]
+    wandb.run.summary["inference_time"] = inference_time
     wandb.run.summary["total_training_time"] = total_time
     wandb.run.summary["unique_sequences"] = len(unique_seqs)
     wandb.run.summary["mean_edit_distance"] = np.mean(distances)
     wandb.run.summary["std_edit_distance"] = np.std(distances)
 
 
+    # Systematic weight-sweep over [w_gc, w_mfe, w_cai] on a regular grid.
+    # For each (w_gc, w_mfe, w_cai), samples sequences via evaluate(), computes per-objective means and hypervolume, then plots the hypervolume heatmap.
+        
+
+    OUTPUT_DIR = "weight_sweep_results"
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+
+
+    # --- GRID SWEEP ---
+    grid = np.linspace(0, 1, GRID_SIZE)
+    records = []
+
+    for w1 in grid:
+        for w2 in grid:
+            if w1 + w2 > 1.0:
+                continue
+            w3 = 1.0 - (w1 + w2)
+            weights = torch.tensor([w1, w2, w3], dtype=torch.float32)
+
+            # sample
+            samples, gc_list, mfe_list, cai_list = evaluate(
+                env, sampler, weights=weights, n_samples=N_SAMPLES
+            )
+
+            # compute means
+            mean_gc  = float(np.mean(gc_list))
+            mean_mfe = float(np.mean(mfe_list))
+            mean_cai = float(np.mean(cai_list))
+
+            # prepare points for hypervolume (flip MFE to max)
+            points = np.vstack([
+                gc_list,
+                -np.array(mfe_list),
+                cai_list
+            ]).T
+
+            # compute hypervolume
+            hv_calc = pg.hypervolume(points)
+            hv = hv_calc.compute(REF_POINT)
+
+            records.append({
+                "w_gc": w1, "w_mfe": w2, "w_cai": w3,
+                "mean_gc": mean_gc, "mean_mfe": mean_mfe,
+                "mean_cai": mean_cai, "hypervolume": hv
+            })
+            print(f"w=({w1:.2f},{w2:.2f},{w3:.2f}) -> HV={hv:.4f}")
+
+
+    df = pd.DataFrame(records)
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    csv_path = os.path.join(OUTPUT_DIR, f"weight_sweep_{ts}.csv")
+    df.to_csv(csv_path, index=False)
+    print(f"\nResults saved to {csv_path}")
+
+
+    # --- PLOT HEATMAP of Hypervolume ---
+    # pivot to matrix form over w1 (rows) × w2 (cols)
+    pivot = df.pivot(index="w_gc", columns="w_mfe", values="hypervolume")
+
+    plt.figure(figsize=(6,5))
+
+    plt.imshow(
+        pivot.values,
+        origin="lower",
+        extent=[pivot.columns.min(), pivot.columns.max(),
+                pivot.index.min(), pivot.index.max()],
+        aspect="auto"
+    )
+
+    plt.colorbar(label="Hypervolume")
+    plt.xlabel("w_mfe")
+    plt.ylabel("w_gc")
+    plt.title("Hypervolume over weight grid (w_cai=1−w_gc−w_mfe)")
+
+    heatmap_path = os.path.join(OUTPUT_DIR, f"hypervolume_heatmap_{ts}.png")
+    plt.tight_layout()
+    plt.savefig(heatmap_path)
+    print(f"Heatmap saved to {heatmap_path}")
+    plt.show()
+
+
+
+
+
 
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
+
     parser.add_argument("--no_cuda", action="store_true", help="Prevent CUDA usage")
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
     parser.add_argument("--lr",type=float,default=1e-3,help="Learning rate for the estimators' modules")
     parser.add_argument("--lr_logz",type=float,default=1e-1,help="Learning rate for the logZ parameter")
+
     parser.add_argument("--n_iterations", type=int, default=200, help="Number of iterations")
     parser.add_argument("--batch_size", type=int, default=2, help="Batch size")
     parser.add_argument("--epsilon", type=float, default=0.1, help="Epsilon for the sampler")
     
     parser.add_argument("--embedding_dim", type=int, default=32, help="Dimension of codon embeddings")
+    
     parser.add_argument("--hidden_dim", type=int, default=256, help="Hidden dimension of the networks")
-    parser.add_argument("--n_hidden", type=int, default=2, help="Number of hidden layers")
+    parser.add_argument("-- ", type=int, default=2, help="Number of hidden layers")
     parser.add_argument("--tied", action="store_true", help="Whether to tie the parameters of PF and PB")
     
     parser.add_argument("--clip_grad_norm", type=float, default=1.0, help="Gradient clipping norm")
@@ -256,9 +368,9 @@ if __name__ == "__main__":
     args = parser.parse_args()
     config = load_config(args.config_path)
 
-    logging.info(f"Loaded config from {args.config_path}")
-    logging.info(f"Training config: {config}")
-    logging.info(f"Run arguments: {args}")
+    # logging.info(f"Loaded config from {args.config_path}")
+    # logging.info(f"Training config: {config}")
+    # logging.info(f"Run arguments: {args}")
 
     main(args)
 

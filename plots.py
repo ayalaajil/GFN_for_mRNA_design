@@ -67,6 +67,30 @@ def plot_pareto_front(gc_list, mfe_list, cai_list, out_path="pareto_scatter.png"
     plt.close()
 
 
+def plot_cai_vs_mfe(cai_list, mfe_list, out_path="cai_vs_mfe.png"):
+    plt.figure(figsize=(6, 5))
+    sns.scatterplot(x=mfe_list, y=cai_list, color='blue', alpha=0.7)
+    plt.xlabel("MFE (kcal/mol)")
+    plt.ylabel("CAI")
+    plt.title("CAI vs MFE")
+    plt.grid(True)
+    plt.tight_layout()
+    plt.savefig(out_path)
+    plt.close()
+
+
+def plot_gc_vs_mfe(gc_list, mfe_list, out_path="gc_vs_mfe.png"):
+    plt.figure(figsize=(6, 5))
+    sns.scatterplot(x=mfe_list, y=gc_list, color='green', alpha=0.7)
+    plt.xlabel("MFE (kcal/mol)")
+    plt.ylabel("GC Content")
+    plt.title("GC Content vs MFE")
+    plt.grid(True)
+    plt.tight_layout()
+    plt.savefig(out_path)
+    plt.close()
+    
+
 def analyze_diversity(sequences, out_path="edit_distance_distribution.png"):
     distances = []
     for i in range(len(sequences)):
