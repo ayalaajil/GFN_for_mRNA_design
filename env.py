@@ -12,8 +12,7 @@ class CodonDesignEnv(DiscreteEnv):
     Dynamic masks restrict actions at each step:
     - At step t < seq_length: only synonymous codons for protein_seq[t] are allowed.
     - At step t == seq_length: only the exit action is allowed.
-
-    Rewards are the GC-content of the full generated sequence.
+    
     """
 
     def __init__(
@@ -74,11 +73,6 @@ class CodonDesignEnv(DiscreteEnv):
     
         max_length = states_tensor.shape[1]
         new_states = states_tensor.clone()
-
-        # if isinstance(actions, Actions):
-        #     valid_actions = actions.tensor.squeeze(-1)
-        # else:
-
         valid_actions = actions.tensor.squeeze(-1)
 
         for i in range(batch_size):
@@ -103,7 +97,6 @@ class CodonDesignEnv(DiscreteEnv):
             if current_length[i] > 0:
                 new_states[i, current_length[i]-1] = -1 
                        
-        # return self.States(new_states)
         return new_states
 
 
@@ -121,14 +114,17 @@ class CodonDesignEnv(DiscreteEnv):
         for i in range(batch_size):
 
             cl = current_length[i].item()
-            # Forward masks
+
             if cl < self.seq_length:
+
                 # Allow synonymous codons
                 syns = self.syn_indices[cl]
                 forward_masks[i, syns] = True
+
             elif cl == self.seq_length:
                 # Allow only exit action
                 forward_masks[i, self.exit_action_index] = True
+
             # Backward masks
             if cl > 0:
                 last_codon = states_tensor[i, cl - 1].item()
@@ -143,7 +139,6 @@ class CodonDesignEnv(DiscreteEnv):
         states_tensor = final_states.tensor
         batch_size = states_tensor.shape[0]
         
-        # Initialize reward components
         gc_percents = []
         mfe_energies = []
         cai_scores = []
@@ -165,7 +160,6 @@ class CodonDesignEnv(DiscreteEnv):
             cai_score = compute_cai(seq_indices)
             cai_scores.append(cai_score)
         
-        # Convert to tensors on correct device
         device = states_tensor.device
         gc_percent = torch.tensor(gc_percents, device=device, dtype=torch.float32)
         mfe_energy = torch.tensor(mfe_energies, device=device, dtype=torch.float32)
@@ -176,7 +170,6 @@ class CodonDesignEnv(DiscreteEnv):
         reward = (reward_components * self.weights.to(device)).sum(dim=-1)
         
         return reward
-
 
     def is_terminal(self, states: DiscreteStates) -> torch.BoolTensor:
         states_tensor = states

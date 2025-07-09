@@ -5,6 +5,10 @@ import numpy as np
 from Levenshtein import distance as levenshtein_distance
 from mpl_toolkits.mplot3d import Axes3D  # for 3D plotting
 import wandb
+import ternary
+
+
+
 
 def plot_training_curves(loss_history, reward_components, out_path="training_curves.png"):
 
@@ -109,3 +113,31 @@ def analyze_diversity(sequences, out_path="edit_distance_distribution.png"):
     plt.close()
 
     return distances
+
+def plot_of_weights_over_iterations(sampled_weights, out_path='plot_of_weights_over_iterations.png'):
+
+    plt.figure(figsize=(10, 4))
+    plt.plot(sampled_weights[:, 0], label="w_gc")
+    plt.plot(sampled_weights[:, 1], label="w_mfe")
+    plt.plot(sampled_weights[:, 2], label="w_cai")
+    plt.xlabel("Iteration")
+    plt.ylabel("Weight")
+    plt.title("Sampled Weights during Training")
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(out_path, dpi=300)
+    plt.show()
+
+
+def plot_ternary_plot_of_weights(sampled_weights, out_path="sampled_weights_ternary.png"):
+
+    figure, tax = ternary.figure(scale=1.0)
+    tax.boundary()
+    tax.gridlines(multiple=0.1, color="gray")
+    tax.scatter(sampled_weights, marker='o', color='blue', alpha=0.5)
+    tax.set_title("Distribution of Sampled Weights")
+    tax.ticks(axis='lbr', multiple=0.1)
+    figure.tight_layout()
+    figure.savefig(out_path, dpi=300)
+
+    tax.show()

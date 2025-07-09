@@ -9,13 +9,18 @@ def train(args, config, env, gflownet, sampler, optimizer, scheduler, device):
     loss_history = []
     reward_history = []
     reward_components_history = []
+    sampled_weights = []
+
     unique_sequences = set()
 
     for it in (pbar := tqdm(range(args.n_iterations), dynamic_ncols=True)):
 
         iter_start_time = time.time()
 
-        weights = np.random.dirichlet([1, 1, 1])
+        weights = np.random.dirichlet([1, 1, 1])   # should plot the weights chosen to gain insight into how the model behaves across different reward configurations
+        sampled_weights.append(weights.tolist())
+
+        
         env.set_weights(weights)
 
         trajectories = sampler.sample_trajectories(
@@ -51,12 +56,15 @@ def train(args, config, env, gflownet, sampler, optimizer, scheduler, device):
         reward_components_history.extend(components)
         loss_history.append(loss.item())
 
-        if it % 10 == 0:
-            wandb.log({
+        wandb.log({
                 "iteration": it,
                 "loss": loss.item(),
-                "avg_reward": avg_reward
+                "avg_reward": avg_reward,
+                "w_gc": weights[0],
+                "w_mfe": weights[1],
+                "w_cai": weights[2]
             })
 
+    sampled_weights = np.array(sampled_weights)
 
-    return loss_history, reward_history, reward_components_history, unique_sequences
+    return loss_history, reward_history, reward_components_history, unique_sequences, sampled_weights
