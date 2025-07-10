@@ -4,6 +4,7 @@ from torchgfn.src.gfn.actions import Actions
 from torchgfn.src.gfn.states import DiscreteStates
 from torchgfn.src.gfn.env import DiscreteEnv
 
+
 # --- mRNA Design Environment ---
 class CodonDesignEnv(DiscreteEnv):
     """
@@ -179,4 +180,3 @@ class CodonDesignEnv(DiscreteEnv):
     @staticmethod
     def make_sink_states_tensor(shape, device=None):
         return torch.zeros(shape, dtype=torch.long, device=device)
-    

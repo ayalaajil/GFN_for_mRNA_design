@@ -1,5 +1,5 @@
 import torch
-from env import CodonDesignEnv, N_CODONS
+from env import N_CODONS
 import torch.nn as nn
 from torchgfn.src.gfn.states import States
 from torchgfn.src.gfn.preprocessors import Preprocessor
@@ -13,8 +13,7 @@ class CodonSequencePreprocessor(Preprocessor):
         self.seq_length = seq_length
         self.embedding_dim = embedding_dim
         self.embedding = nn.Embedding(N_CODONS + 1, embedding_dim, padding_idx=N_CODONS).to(device)    # maybe learnable
-        
-        
+               
     def preprocess(self, states: States) -> torch.Tensor:
 
         states_tensor = states.tensor.long().clone()
@@ -24,3 +23,4 @@ class CodonSequencePreprocessor(Preprocessor):
 
         out = embedded.view(states_tensor.shape[0], -1)
         return out
+

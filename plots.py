@@ -1,14 +1,10 @@
 import matplotlib.pyplot as plt
 import torch
 import seaborn as sns
-import numpy as np
 from Levenshtein import distance as levenshtein_distance
-from mpl_toolkits.mplot3d import Axes3D  # for 3D plotting
-import wandb
 import ternary
-
-
-
+import matplotlib.pyplot as plt
+import numpy as np
 
 def plot_training_curves(loss_history, reward_components, out_path="training_curves.png"):
 
@@ -57,7 +53,6 @@ def plot_metric_histograms(gc_list, mfe_list, cai_list, out_path="metric_distrib
     plt.close()
 
     
-
 def plot_pareto_front(gc_list, mfe_list, cai_list, out_path="pareto_scatter.png"):
     fig = plt.figure(figsize=(8, 6))
     ax = fig.add_subplot(111, projection='3d')
@@ -141,3 +136,117 @@ def plot_ternary_plot_of_weights(sampled_weights, out_path="sampled_weights_tern
     figure.savefig(out_path, dpi=300)
 
     tax.show()
+
+
+
+def plot_pairwise_scatter(results, x_key, y_key):
+
+    """
+    Scatter-plot results[i].metrics[x_key] vs. results[i].metrics[y_key]
+    for each config in results.
+    """
+    
+    default_markers = ['o', 's', '^', 'D', 'v', 'P', 'X', '*']
+    default_colors  = plt.cm.tab10.colors 
+    markers = default_markers
+    colors  = default_colors
+
+    plt.figure(figsize=(6,6))
+
+    for i, res in enumerate(results):
+        x = res["metrics"][x_key]
+        y = res["metrics"][y_key]
+        m = markers[i % len(markers)]
+        c = colors[i % len(colors)]
+        plt.scatter(x, y,
+                    marker=m, color=c,
+                    alpha=0.4,
+                    label=res["name"],
+                    edgecolors='none',
+                    s=30)      
+
+    plt.legend(loc='best', fontsize='small', framealpha=0.8)
+    plt.title(f"{y_key.upper()} vs {x_key.upper()} by Config")
+    plt.xlabel(x_key.upper())
+    plt.ylabel(y_key.upper())
+    plt.grid(True, linestyle='--', alpha=0.5)
+    plt.tight_layout()
+    plt.savefig(f"{y_key.upper()}_vs_{x_key.upper()}_by_config.png", dpi=300)
+    plt.show()
+
+def is_pareto_efficient_3d(costs):
+    """
+    Determine Pareto-efficient points for 3 objectives.
+    costs: array of shape (N, 3) with objectives:
+        - (-CAI)  [we want to maximize CAI]
+        -  MFE    [we want to minimize MFE]
+        -  GC     [we want to maximize GC]
+    Returns: Boolean mask of Pareto-efficient points
+    """
+    is_efficient = np.ones(costs.shape[0], dtype=bool)
+
+    for i, c in enumerate(costs):
+
+        if is_efficient[i]:
+
+            # Remove dominated points
+            is_efficient[is_efficient] = np.any(costs[is_efficient] > c, axis=1) | np.all(costs[is_efficient] == c, axis=1)
+            is_efficient[i] = True
+            
+    return is_efficient
+
+def plot_pairwise_scatter_with_pareto(results, x_key="CAI", y_key="MFE"):
+    """
+    Scatter plot of y_key vs x_key (e.g., MFE vs CAI) by config,
+    with Pareto front computed using all 3 objectives: CAI (maximize), MFE (minimize), GC (maximize).
+    """
+
+    markers = ['o', 's', '^', 'D', 'v', 'P', 'X', '*']
+    colors = plt.cm.tab10.colors
+
+    all_points_2d = []
+    all_points_3d = []
+
+    plt.figure(figsize=(7, 6))
+
+    for i, res in enumerate(results):
+        xs = np.array(res["metrics"][x_key])
+        ys = np.array(res["metrics"][y_key])
+        gcs = np.array(res["metrics"]["GC"]) 
+        m = markers[i % len(markers)]
+        c = colors[i % len(colors)]
+
+        all_points_2d.extend(zip(xs, ys))
+        all_points_3d.extend(zip(xs, ys, gcs))
+
+        plt.scatter(xs, 
+                    ys,
+                    marker=m, color=c,
+                    alpha=0.4,
+                    label=res["name"],
+                    edgecolors='none',
+                    s=40)
+
+    # Compute Pareto front
+    cost_array = np.array([
+        [-x, y, -gc] for x, y, gc in all_points_3d
+    ])
+    pareto_mask = is_pareto_efficient_3d(cost_array)
+    pareto_points = np.array(all_points_2d)[pareto_mask]
+
+    pareto_sorted = pareto_points[np.argsort(pareto_points[:, 0])]
+
+    plt.plot(pareto_sorted[:, 0], pareto_sorted[:, 1], color="black", linestyle="--", label="Pareto Front", linewidth=1.5)
+    plt.scatter(pareto_sorted[:, 0], pareto_sorted[:, 1], color="black", edgecolor='k', marker='X', s=60, label="Pareto Points")
+
+
+    plt.gca().invert_yaxis()  # since lower MFE is better
+    plt.xlabel(x_key.upper())
+    plt.ylabel(y_key.upper())
+    plt.title(f"{y_key.upper()} vs {x_key.upper()} by Config\nwith Pareto Front (incl. GC)")
+    plt.legend(loc='best', fontsize='small', framealpha=0.8)
+    plt.grid(True, linestyle='--', alpha=0.5)
+    plt.tight_layout()
+    plt.savefig(f"{y_key.upper()}_vs_{x_key.upper()}_with_Pareto.png", dpi=300)
+    plt.show()
+

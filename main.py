@@ -1,28 +1,21 @@
 from env import CodonDesignEnv
 from preprocessor import CodonSequencePreprocessor
 from train import train
-from evaluate import evaluate
-from plots import plot_training_curves, analyze_diversity, plot_metric_histograms, plot_pareto_front, plot_cai_vs_mfe, plot_gc_vs_mfe, plot_of_weights_over_iterations, plot_ternary_plot_of_weights
+from evaluate import evaluate, sweep_weight_configs
+from plots import *
 from datetime import datetime
 from utils import load_config, tokenize_sequence_to_tensor
 import logging
 import torch
 import argparse
 import numpy as np
-import matplotlib.pyplot as plt
 import time
-import Levenshtein
-import seaborn as sns
 import wandb
 from comparison import analyze_sequence_properties
 from torchgfn.src.gfn.gflownet import TBGFlowNet
 from torchgfn.src.gfn.modules import DiscretePolicyEstimator
-from torchgfn.src.gfn.utils.modules import MLP, DiscreteUniform, Tabular
+from torchgfn.src.gfn.utils.modules import MLP
 from torchgfn.src.gfn.samplers import Sampler
-
-import os
-import pandas as pd
-import pygmo as pg
 
 
 logging.basicConfig(
@@ -36,7 +29,6 @@ def main(args):
     device = (torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")) 
     logging.info(f"Using device: {device}")
 
-
     if args.wandb_project:
 
         logging.info("Initializing Weights & Biases...")
@@ -47,12 +39,12 @@ def main(args):
             name=config.run_name if config.run_name else None
         )
 
-    # Track training time
+    # training time
     start_time = time.time()
 
     # 1. Create the environment.
-
     logging.info("Creating environment...")
+
     env = CodonDesignEnv(protein_seq=config.protein_seq, device=device)   
     preprocessor = CodonSequencePreprocessor(env.seq_length, embedding_dim=args.embedding_dim, device=device)   
 
@@ -127,21 +119,38 @@ def main(args):
 
     start_inference_time = time.time()
 
-    n_samples= 100
 
     # Sample final sequences
     with torch.no_grad():
 
-        samples, gc_list, mfe_list, cai_list = evaluate(env, sampler, weights=torch.tensor([0.3, 0.3, 0.4]), n_samples= n_samples)
+        samples, gc_list, mfe_list, cai_list = evaluate(env, sampler, weights=torch.tensor([0.3, 0.3, 0.4]), n_samples= args.n_samples)
 
     inference_time = time.time() - start_inference_time
-    avg_time_per_seq = inference_time / n_samples
+    avg_time_per_seq = inference_time / args.n_samples
 
     logging.info(f"Inference (sampling) completed in {inference_time:.2f} seconds.")
     logging.info(f"Average time per generated sequence is {avg_time_per_seq:.2f} seconds.")
 
-    logging.info("Saving trained model and metrics...")
 
+    # weight_configs = {
+    # "GC_only": [1.0, 0.0, 0.0],
+    # "MFE_only": [0.0, 1.0, 0.0],
+    # "CAI_only": [0.0, 0.0, 1.0],
+    # "MFE+CAI": [0.0, 0.5, 0.5],
+    # }
+
+    # all_results = sweep_weight_configs(env, sampler, weight_configs, n_samples=50)
+
+    # plot_pairwise_scatter(all_results, 'CAI', 'MFE')
+    # plot_pairwise_scatter(all_results, 'CAI', 'GC')
+
+    # plot_pairwise_scatter_with_pareto(all_results)
+
+
+######################################## Save model ########################################
+
+
+    logging.info("Saving trained model and metrics...")
     torch.save({
             'model_state': gflownet.state_dict(),
             'logZ': gflownet.logZ,
@@ -151,7 +160,6 @@ def main(args):
             }
         }, "trained_gflownet.pth")
 
-    
     logging.info("Plotting final metric histograms and Pareto front...")
 
     plot_metric_histograms(gc_list, mfe_list, cai_list, out_path="metric_distributions.png")
@@ -167,7 +175,9 @@ def main(args):
 
     sorted_samples = sorted(samples.items(), key=lambda x: x[1][0], reverse=True)
 
-    ######################### Extract Best-by-Objective Sequences ##############################
+
+############################# Extract Best-by-Objective Sequences ##########################
+
 
     # Get best sequences for each reward component
     best_gc = max(samples.items(), key=lambda x: x[1][1][0])   # GC content
@@ -265,6 +275,8 @@ if __name__ == "__main__":
     parser.add_argument("--lr_logz",type=float,default=1e-1,help="Learning rate for the logZ parameter")
 
     parser.add_argument("--n_iterations", type=int, default=50, help="Number of iterations")
+    parser.add_argument("--n_samples", type=int, default=50, help="Number of samples to generate")
+
     parser.add_argument("--batch_size", type=int, default=2, help="Batch size")
     parser.add_argument("--epsilon", type=float, default=0.1, help="Epsilon for the sampler")
     
@@ -284,10 +296,6 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
     config = load_config(args.config_path)
-
-    # logging.info(f"Loaded config from {args.config_path}")
-    # logging.info(f"Training config: {config}")
-    # logging.info(f"Run arguments: {args}")
 
     main(args)
 
