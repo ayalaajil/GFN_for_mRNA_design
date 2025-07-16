@@ -3,7 +3,7 @@ from utils import N_CODONS, ALL_CODONS, IDX_TO_CODON, compute_gc_content_vectori
 from torchgfn.src.gfn.actions import Actions
 from torchgfn.src.gfn.states import DiscreteStates
 from torchgfn.src.gfn.env import DiscreteEnv
-
+from typing import Union
 
 # --- mRNA Design Environment ---
 class CodonDesignEnv(DiscreteEnv):
@@ -52,16 +52,19 @@ class CodonDesignEnv(DiscreteEnv):
         )
 
         self.idx_to_codon = IDX_TO_CODON
+        self.States: type[DiscreteStates] = self.States
 
 
-    def set_weights(self, w : list):
+    def set_weights(self, w: Union[list, torch.Tensor]):
         """
         Store the current preference weights (w) for conditional reward.
         """
         if not isinstance(w, torch.Tensor):
-          w = torch.tensor(w, dtype=torch.float32)
+            w = torch.tensor(w, dtype=torch.float32)
 
-        self.weights = w
+        if w is not None:
+            self.weights = w
+
 
     def step(self,
             states: DiscreteStates, 
@@ -119,7 +122,7 @@ class CodonDesignEnv(DiscreteEnv):
             if cl < self.seq_length:
 
                 # Allow synonymous codons
-                syns = self.syn_indices[cl]
+                syns = self.syn_indices[int(cl)]
                 forward_masks[i, syns] = True
 
             elif cl == self.seq_length:
@@ -128,16 +131,16 @@ class CodonDesignEnv(DiscreteEnv):
 
             # Backward masks
             if cl > 0:
-                last_codon = states_tensor[i, cl - 1].item()
+                last_codon = states_tensor[i, int(cl) - 1].item()
                 if last_codon >= 0:
-                    backward_masks[i, last_codon] = True
+                    backward_masks[i, int(last_codon)] = True
 
         states.forward_masks = forward_masks
         states.backward_masks = backward_masks
 
-    def reward(self, final_states: DiscreteStates) -> torch.Tensor:
+    def reward(self, states: DiscreteStates) -> torch.Tensor:
 
-        states_tensor = final_states.tensor
+        states_tensor = states.tensor
         batch_size = states_tensor.shape[0]
         
         gc_percents = []

@@ -49,6 +49,19 @@ codon_gc_counts = torch.tensor([
             codon.count('G') + codon.count('C') for codon in ALL_CODONS
         ], dtype=torch.float)
 
+def dna_to_mrna(dna: str) -> str:
+    """Convert a DNA sequence to an mRNA sequence by replacing T with U."""
+    dna = dna.upper().replace(" ", "")
+    mrna = dna.replace('T', 'U')
+    return mrna
+    
+def extract_sequence_from_fasta(fasta_path: str) -> str:
+
+    with open(fasta_path, "r") as f:
+        lines = f.readlines()
+    sequence = "".join(line.strip() for line in lines if not line.startswith(">"))
+    return sequence
+
 
 # -- Helper: Tokenize codon string to LongTensor
 def tokenize_sequence_to_tensor(seq):
@@ -83,7 +96,7 @@ def to_mRNA_string(rna_tensor : torch.Tensor):
 
     rna_string = ''
     for i in range(0,len(rna_tensor)):
-        cd = IDX_TO_CODON[rna_tensor[i].item()]
+        cd = IDX_TO_CODON[int(rna_tensor[i].item())]
         rna_string += cd
 
     return rna_string 

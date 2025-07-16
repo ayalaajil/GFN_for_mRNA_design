@@ -9,7 +9,7 @@ def train(args, config, env, gflownet, sampler, optimizer, scheduler, device):
     loss_history = []
     reward_history = []
     reward_components_history = []
-    sampled_weights = []
+    # sampled_weights = []
 
     unique_sequences = set()
 
@@ -17,11 +17,9 @@ def train(args, config, env, gflownet, sampler, optimizer, scheduler, device):
 
         iter_start_time = time.time()
 
-        weights = np.random.dirichlet([1, 1, 1])   # should plot the weights chosen to gain insight into how the model behaves across different reward configurations
-        sampled_weights.append(weights.tolist())
-
-        
-        env.set_weights(weights)
+        # weights = np.random.dirichlet([1, 1, 1])   # analyze the weights chosen to gain insight into how the model behaves across different reward configurations
+        # sampled_weights.append(weights.tolist()
+        # env.set_weights(weights)
 
         trajectories = sampler.sample_trajectories(
             env, args.batch_size, save_logprobs=True, epsilon=args.epsilon
@@ -43,7 +41,6 @@ def train(args, config, env, gflownet, sampler, optimizer, scheduler, device):
         for state in final_states:
 
             state = state.to(device)
-
             r, c = compute_reward(state, env.codon_gc_counts, env.weights)   #(gc, mfe, cai)
             rewards.append(r)
             components.append(c)
@@ -60,11 +57,12 @@ def train(args, config, env, gflownet, sampler, optimizer, scheduler, device):
                 "iteration": it,
                 "loss": loss.item(),
                 "avg_reward": avg_reward,
-                "w_gc": weights[0],
-                "w_mfe": weights[1],
-                "w_cai": weights[2]
+                "w_gc": env.weights[0],
+                "w_mfe": env.weights[1],
+                "w_cai": env.weights[2]
             })
 
-    sampled_weights = np.array(sampled_weights)
+    # sampled_weights = np.array(sampled_weights)
 
-    return loss_history, reward_history, reward_components_history, unique_sequences, sampled_weights
+    return loss_history, reward_history, reward_components_history, unique_sequences
+    #return loss_history, reward_history, reward_components_history, unique_sequences, sampled_weights

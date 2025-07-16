@@ -5,6 +5,8 @@ from Levenshtein import distance as levenshtein_distance
 import ternary
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
+
 
 def plot_training_curves(loss_history, reward_components, out_path="training_curves.png"):
 
@@ -29,8 +31,30 @@ def plot_training_curves(loss_history, reward_components, out_path="training_cur
         axes[i + 1].set_xlabel("Iteration", fontsize=12)
         axes[i + 1].legend()
 
-    plt.tight_layout(rect=[0, 0.03, 1, 0.95])  
+    plt.tight_layout(rect=(0.0, 0.03, 1.0, 0.95))  
     plt.savefig(out_path, dpi=300) 
+    plt.close()
+
+def plot_sweep_results(csv_path="sweep_results.csv"):
+
+    df = pd.read_csv(csv_path)
+
+    metrics = ["MFE", "CAI", "GC"]
+    titles = ["MFE comparison", "CAI comparison", "GC comparison"]
+    
+    fig, axes = plt.subplots(1, 3, figsize=(18, 5))
+
+    for i, metric in enumerate(metrics):
+
+        ax = axes[i]
+        sns.boxplot(x="Config", y=metric, data=df, ax=ax, palette="colorblind")
+        sns.stripplot(x="Config", y=metric, data=df, ax=ax, color="black", alpha=0.4, jitter=True)
+        ax.set_title(titles[i])
+        ax.set_xlabel("")
+        ax.tick_params(axis='x', rotation=30)
+
+    plt.tight_layout()
+    plt.savefig("sweep_results_boxplots.png", dpi=300) 
     plt.close()
 
 

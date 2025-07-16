@@ -9,6 +9,8 @@ from torchgfn.src.gfn.samplers import Sampler
 from utils import load_config
 import numpy as np
 import pandas as pd
+import seaborn as sns
+import matplotlib.pyplot as plt
 
 def evaluate(env, sampler, weights, n_samples=100):
 
@@ -65,16 +67,19 @@ def sweep_weight_configs(env, sampler, configs, n_samples=10, save_path="sweep_r
         print(f"Evaluating config: {config_name} with weights: {weights}")
 
         samples, gc_list, mfe_list, cai_list = evaluate(env, sampler, weights, n_samples)
+
         result = {
             "name": config_name,
             "weights": weights,
             "samples": samples,
             "metrics": {'GC': gc_list, 'MFE': mfe_list, 'CAI': cai_list}
         }
+
         all_results.append(result)
 
         for i in range(n_samples):
-                rows.append({
+
+            rows.append({
                     "Config": config_name,
                     "Weight_GC": weights[0],
                     "Weight_MFE": weights[1],
@@ -85,13 +90,11 @@ def sweep_weight_configs(env, sampler, configs, n_samples=10, save_path="sweep_r
                     "CAI": cai_list[i]
                 })
 
-
     df = pd.DataFrame(rows)
     df.to_csv(save_path, index=False)
     print(f"\nSaved results table to: {save_path}")
 
     return all_results
-
 
 
 def load_trained_model(checkpoint_path: str, config_path: str = "config.yaml"):
