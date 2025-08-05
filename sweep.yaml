@@ -1,0 +1,27 @@
+program: main.py
+method: bayes
+metric:
+  name: Eval_avg_reward
+  goal: maximize
+parameters:
+  lr:
+    min: 1e-4
+    max: 1e-2
+    distribution: log_uniform
+  lr_logz:
+    min: 1e-3
+    max: 1.0
+    distribution: log_uniform
+  batch_size:
+    values: [8, 16, 32]
+  epsilon:
+    min: 0.0
+    max: 0.5
+  embedding_dim:
+    values: [16, 32, 64]
+  hidden_dim:
+    values: [128, 256, 512]
+  n_hidden:
+    values: [1, 2, 3]
+  tied:
+    values: [True, False]

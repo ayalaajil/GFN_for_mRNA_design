@@ -1,0 +1,9 @@
+Best_hyperparameters = {'lr': 0.0005876783399995771,
+'lr_logz': 0.010288695676294389,
+ 'batch_size': 2,
+  'epsilon': 0.3346584155876452,
+   'embedding_dim': 64,
+    'hidden_dim': 256,
+     'n_hidden': 3,
+      'tied': False
+      }

@@ -3,6 +3,8 @@ from tqdm import tqdm
 from utils import compute_reward
 import wandb
 import time
+from plots import *
+
 
 def train(args, config, env, gflownet, sampler, optimizer, scheduler, device):
 
@@ -41,28 +43,41 @@ def train(args, config, env, gflownet, sampler, optimizer, scheduler, device):
         for state in final_states:
 
             state = state.to(device)
-            r, c = compute_reward(state, env.codon_gc_counts, env.weights)   #(gc, mfe, cai)
+            r, c = compute_reward(
+                state, env.codon_gc_counts, env.weights
+            )  # (gc, mfe, cai)
             rewards.append(r)
             components.append(c)
 
-            seq = ''.join([env.idx_to_codon[i.item()] for i in state])
+            seq = "".join([env.idx_to_codon[i.item()] for i in state])
             unique_sequences.add(seq)
 
         avg_reward = sum(rewards) / len(rewards)
         reward_history.append(avg_reward)
         reward_components_history.extend(components)
+
+        components_tensor = torch.tensor(components)
+        avg_gc, avg_mfe, avg_cai = components_tensor.mean(dim=0).tolist()
+
         loss_history.append(loss.item())
 
-        wandb.log({
+        wandb.log(
+            {
                 "iteration": it,
                 "loss": loss.item(),
                 "avg_reward": avg_reward,
+                "avg_gc": avg_gc,
+                "avg_mfe": avg_mfe,
+                "avg_cai": avg_cai,
                 "w_gc": env.weights[0],
                 "w_mfe": env.weights[1],
-                "w_cai": env.weights[2]
-            })
+                "w_cai": env.weights[2],
+                "iter_time": iter_time,
+            }
+        )
 
     # sampled_weights = np.array(sampled_weights)
 
     return loss_history, reward_history, reward_components_history, unique_sequences
-    #return loss_history, reward_history, reward_components_history, unique_sequences, sampled_weights
+
+    # return loss_history, reward_history, reward_components_history, unique_sequences, sampled_weights

@@ -2,7 +2,7 @@ from MFE_calculator import RNAFolder
 from CAI_calculator import CAICalculator
 import torch
 import yaml
-import string
+
 from types import SimpleNamespace
 from typing import List, Dict
 
@@ -12,49 +12,65 @@ from typing import List, Dict
 STOP_CODONS: List[str] = ["UAA", "UAG", "UGA"]
 
 # Codon table mapping amino acids (or stop *) to codons, example of protein sequence : ACDEFGHIKLMNPQ
-CODON_TABLE : Dict[str, List[str]] = {
-    'A': ['GCU', 'GCC', 'GCA', 'GCG'],
-    'C': ['UGU', 'UGC'],
-    'D': ['GAU', 'GAC'],
-    'E': ['GAA', 'GAG'],
-    'F': ['UUU', 'UUC'],
-    'G': ['GGU', 'GGC', 'GGA', 'GGG'],
-    'H': ['CAU', 'CAC'],
-    'I': ['AUU', 'AUC', 'AUA'],
-    'K': ['AAA', 'AAG'],
-    'L': ['UUA', 'UUG', 'CUU', 'CUC', 'CUA', 'CUG'],
-    'M': ['AUG'],
-    'N': ['AAU', 'AAC'],
-    'P': ['CCU', 'CCC', 'CCA', 'CCG'],
-    'Q': ['CAA', 'CAG'],
-    'R': ['CGU', 'CGC', 'CGA', 'CGG', 'AGA', 'AGG'],
-    'S': ['UCU', 'UCC', 'UCA', 'UCG', 'AGU', 'AGC'],
-    'T': ['ACU', 'ACC', 'ACA', 'ACG'],
-    'V': ['GUU', 'GUC', 'GUA', 'GUG'],
-    'W': ['UGG'],
-    'Y': ['UAU', 'UAC'],
-    '*': ['UAA', 'UAG', 'UGA'],  # Stop codons
+CODON_TABLE: Dict[str, List[str]] = {
+    "A": ["GCU", "GCC", "GCA", "GCG"],
+    "C": ["UGU", "UGC"],
+    "D": ["GAU", "GAC"],
+    "E": ["GAA", "GAG"],
+    "F": ["UUU", "UUC"],
+    "G": ["GGU", "GGC", "GGA", "GGG"],
+    "H": ["CAU", "CAC"],
+    "I": ["AUU", "AUC", "AUA"],
+    "K": ["AAA", "AAG"],
+    "L": ["UUA", "UUG", "CUU", "CUC", "CUA", "CUG"],
+    "M": ["AUG"],
+    "N": ["AAU", "AAC"],
+    "P": ["CCU", "CCC", "CCA", "CCG"],
+    "Q": ["CAA", "CAG"],
+    "R": ["CGU", "CGC", "CGA", "CGG", "AGA", "AGG"],
+    "S": ["UCU", "UCC", "UCA", "UCG", "AGU", "AGC"],
+    "T": ["ACU", "ACC", "ACA", "ACG"],
+    "V": ["GUU", "GUC", "GUA", "GUG"],
+    "W": ["UGG"],
+    "Y": ["UAU", "UAC"],
+    "*": ["UAA", "UAG", "UGA"],  # Stop codons
 }
 
 
-# Amino acid list 
+# Amino acid list
 AA_LIST: List[str] = list(CODON_TABLE.keys())
-ALL_CODONS: List[str] = sorted(list(set(c for codons in CODON_TABLE.values() for c in codons)))
+ALL_CODONS: List[str] = sorted(
+    list(set(c for codons in CODON_TABLE.values() for c in codons))
+)
 N_CODONS: int = len(ALL_CODONS)
 CODON_TO_IDX: Dict[str, int] = {codon: idx for idx, codon in enumerate(ALL_CODONS)}
 IDX_TO_CODON: Dict[int, str] = {idx: codon for codon, idx in CODON_TO_IDX.items()}
 
 
-codon_gc_counts = torch.tensor([
-            codon.count('G') + codon.count('C') for codon in ALL_CODONS
-        ], dtype=torch.float)
+codon_gc_counts = torch.tensor(
+    [codon.count("G") + codon.count("C") for codon in ALL_CODONS], dtype=torch.float
+)
+
 
 def dna_to_mrna(dna: str) -> str:
     """Convert a DNA sequence to an mRNA sequence by replacing T with U."""
     dna = dna.upper().replace(" ", "")
-    mrna = dna.replace('T', 'U')
+    mrna = dna.replace("T", "U")
     return mrna
-    
+
+
+def codon_idx_to_aa(codon_idx: int) -> str:
+    """
+    Given a codon index (0 <= codon_idx < N_CODONS),
+    return the corresponding amino acid (including '*' for stop codons).
+    """
+    codon = IDX_TO_CODON[codon_idx]
+    for aa, codons in CODON_TABLE.items():
+        if codon in codons:
+            return aa
+    raise ValueError(f"Codon {codon} not found in CODON_TABLE.")
+
+
 def extract_sequence_from_fasta(fasta_path: str) -> str:
 
     with open(fasta_path, "r") as f:
@@ -63,14 +79,15 @@ def extract_sequence_from_fasta(fasta_path: str) -> str:
     return sequence
 
 
-# -- Helper: Tokenize codon string to LongTensor
+# --Helper: Tokenize codon string to LongTensor
 def tokenize_sequence_to_tensor(seq):
-    codons = [seq[i:i+3] for i in range(0, len(seq), 3)]
+    codons = [seq[i : i + 3] for i in range(0, len(seq), 3)]
     indices = [CODON_TO_IDX[c] for c in codons if c in CODON_TO_IDX]
     return torch.tensor(indices, dtype=torch.long)
 
+
 def decode_sequence(tensor_seq):
-    return ''.join([IDX_TO_CODON[int(i)] for i in tensor_seq])
+    return "".join([IDX_TO_CODON[int(i)] for i in tensor_seq])
 
 
 # --- Utility Functions ---
@@ -82,24 +99,27 @@ def get_synonymous_indices(amino_acid: str) -> List[int]:
     codons = CODON_TABLE.get(amino_acid, [])
     return [CODON_TO_IDX[c] for c in codons]
 
-def mRNA_string_to_tensor(rna: string):
+
+def mRNA_string_to_tensor(rna: str):
 
     rna_index = []
-    for i in range(0,len(rna)-3,3):
-        index = CODON_TO_IDX[rna[i:i+3]]
+    for i in range(0, len(rna) - 3, 3):
+        index = CODON_TO_IDX[rna[i : i + 3]]
         rna_index.append(index)
-    
+
     rna_tensor = torch.tensor(rna_index)
     return rna_tensor
 
-def to_mRNA_string(rna_tensor : torch.Tensor):
 
-    rna_string = ''
-    for i in range(0,len(rna_tensor)):
+def to_mRNA_string(rna_tensor: torch.Tensor):
+
+    rna_string = ""
+    for i in range(0, len(rna_tensor)):
         cd = IDX_TO_CODON[int(rna_tensor[i].item())]
         rna_string += cd
 
-    return rna_string 
+    return rna_string
+
 
 def load_config(path: str):
     with open(path, "r") as f:
@@ -107,7 +127,9 @@ def load_config(path: str):
     return SimpleNamespace(**cfg_dict)
 
 
-def compute_gc_content_vectorized(indices: torch.LongTensor, codon_gc_counts: torch.Tensor) -> torch.FloatTensor:
+def compute_gc_content_vectorized(
+    indices: torch.Tensor, codon_gc_counts: torch.Tensor
+) -> torch.Tensor:
     """
     Vectorized GC content calculation using precomputed codon GC counts
     """
@@ -118,7 +140,10 @@ def compute_gc_content_vectorized(indices: torch.LongTensor, codon_gc_counts: to
 
     return gc_content.to(device)
 
-def compute_mfe_energy(indices: torch.LongTensor, energies=None, loop_min=4) -> torch.FloatTensor:
+
+def compute_mfe_energy(
+    indices: torch.Tensor, energies=None, loop_min=4
+) -> torch.Tensor:
     """
     Compute the minimum free energy (MFE) of an RNA sequence using Zucker Algorithm.
     """
@@ -126,30 +151,31 @@ def compute_mfe_energy(indices: torch.LongTensor, energies=None, loop_min=4) -> 
     mfe_energies = []
     rna_str = to_mRNA_string(indices)
     try:
-            sol = RNAFolder(energies=energies, loop_min=loop_min)
-            s = sol.solve(rna_str)
-            energy = s.energy()
+        sol = RNAFolder(energies=energies, loop_min=loop_min)
+        s = sol.solve(rna_str)
+        energy = s.energy()
     except Exception as e:
-            print(f"Energy computation failed for: {rna_str}, error: {e}")
-            energy = float('inf')
+        print(f"Energy computation failed for: {rna_str}, error: {e}")
+        energy = float("inf")
 
     mfe_energies.append(energy)
     return torch.tensor(mfe_energies, dtype=torch.float32).to(device)
 
 
-def compute_cai(indices: torch.LongTensor, energies=None, loop_min=4) -> torch.FloatTensor:
+def compute_cai(indices: torch.Tensor, energies=None, loop_min=4) -> torch.Tensor:
 
     device = indices.device
     cai_scores = []
     rna_str = to_mRNA_string(indices)
     try:
-            calc = CAICalculator(rna_str)
-            score=calc.compute_cai()
+        calc = CAICalculator(rna_str)
+        score = calc.compute_cai()
     except Exception as e:
-            print(f"CAI computation failed for: {rna_str}, error: {e}")
-            score = float('inf')
+        print(f"CAI computation failed for: {rna_str}, error: {e}")
+        score = float("inf")
     cai_scores.append(score)
     return torch.tensor(cai_scores, dtype=torch.float32).to(device)
+
 
 def compute_reward_components(state, codon_gc_counts):
     gc_content = compute_gc_content_vectorized(state, codon_gc_counts).item()
@@ -157,9 +183,8 @@ def compute_reward_components(state, codon_gc_counts):
     cai_score = compute_cai(state).item()
     return gc_content, mfe_energy, cai_score
 
+
 def compute_reward(state, codon_gc_counts, weights):
     gc, mfe, cai = compute_reward_components(state, codon_gc_counts)
-    reward = sum(w * r for w, r in zip(weights, [gc, -mfe, cai]))    # weighted sum
+    reward = sum(w * r for w, r in zip(weights, [gc, -mfe, cai]))  # weighted sum
     return reward, (gc, mfe, cai)
-
-

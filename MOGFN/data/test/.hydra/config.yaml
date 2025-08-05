@@ -1,0 +1,98 @@
+task:
+  _target_: mo_gfn.torch_seq_moo.tasks.nupack.NupackTask
+  objectives:
+  - energy
+  - pins
+  - pairs
+  eval_pref:
+  - 0.5
+  - 0.25
+  - 0.25
+  score_max:
+  - 60
+  - 8
+  - 16
+  regex_list: null
+  min_len: 30
+  max_len: 60
+  num_start_examples: 512
+  batch_size: 16
+  max_num_edits: null
+  max_ngram_size: 1
+  allow_len_change: true
+  max_score_per_dim: 16
+algorithm:
+  _target_: torch_seq_moo.algorithms.mogfn.MOGFN
+  _recursive_: false
+  num_rounds: 64
+  num_gens: 16
+  random_action_prob: 0.01
+  max_len: ${task.max_len}
+  min_len: ${task.min_len}
+  eval_metrics:
+  - hypervolume
+  - r2
+  - hsri
+  batch_size: 1
+  reward_exp: 4
+  reward_min: 1.0e-80
+  reward_max: 100
+  sampling_temp: 1
+  train_steps: 10000
+  beta_use_therm: true
+  pref_use_therm: true
+  beta_cond: false
+  pref_cond: true
+  beta_scale: 1
+  beta_shape: 32
+  pref_alpha:
+  - 1.0
+  - 1.0
+  - 1.0
+  pi_lr: 1.0e-05
+  z_lr: 0.0001
+  wd: 0.0001
+  beta_max: 42
+  therm_n_bins: 50
+  gen_clip: 10
+  encoder_obj: mlm
+  reward_type: convex
+  sample_beta: 80
+  simplex_bins: 50
+  eval_freq: 500
+  k: 10
+  num_samples: 128
+  use_eval_pref: false
+  state_save_path: results/state.pt
+  num_pareto_points: 500
+  pareto_freq: 500
+  unnormalize_rewards: false
+  model:
+    _target_: torch_seq_moo.algorithms.mogfn_utils.conditional_transformer.CondGFNTransformer
+    max_len: ${task.max_len}
+    vocab_size: 26
+    num_actions: 21
+    num_hid: 64
+    num_layers: 3
+    num_head: 8
+    bidirectional: false
+    dropout: 0
+    batch_size: 128
+tokenizer:
+  _target_: torch_seq_moo.utils.AptamerTokenizer
+seed: 1
+trial_id: 0
+project_name: gfn_mo
+version: v0.0.1
+data_dir: ./data
+experiment_name: ${task}
+trial_name: trial_${now:%Y-%m-%d_%H-%M-%S}
+run_name: ${experiment_name}_${trial_name}
+exp_name: test
+group_name: somedetails
+exp_tags: []
+job_name: null
+timestamp: ${now:%Y-%m-%d_%H-%M-%S}
+log_dir: ${data_dir}/${exp_name}
+wandb_mode: online
+wandb_project: gfn_mo
