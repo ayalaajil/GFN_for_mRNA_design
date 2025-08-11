@@ -309,7 +309,7 @@ if __name__ == "__main__":
     )
 
     parser.add_argument(
-        "--n_iterations", type=int, default=200, help="Number of iterations"
+        "--n_iterations", type=int, default=100, help="Number of iterations"
     )
     parser.add_argument(
         "--n_samples", type=int, default=100, help="Number of samples to generate"
