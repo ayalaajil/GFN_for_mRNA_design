@@ -188,3 +188,6 @@ def compute_reward(state, codon_gc_counts, weights):
     gc, mfe, cai = compute_reward_components(state, codon_gc_counts)
     reward = sum(w * r for w, r in zip(weights, [gc, -mfe, cai]))  # weighted sum
     return reward, (gc, mfe, cai)
+
+
+

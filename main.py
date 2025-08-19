@@ -1,3 +1,7 @@
+import sys
+import os
+sys.path.insert(0,os.path.join(os.path.dirname(__file__), 'torchgfn', 'src'))
+
 from env import CodonDesignEnv
 from preprocessor import CodonSequencePreprocessor
 from train import train
@@ -50,11 +54,18 @@ def main(args, config):
     logging.info(f"Protein sequence length: {len(config.protein_seq)}")
     logging.info("Building GFlowNet model...")
 
+
     module_PF = MLP(
         input_dim=preprocessor.output_dim,
         output_dim=env.n_actions,
         hidden_dim=args.hidden_dim,
         n_hidden_layers=args.n_hidden,
+    )
+
+    module_PF = MLP(
+        input_dim=preprocessor.output_dim,
+        output_dim=env.n_actions,
+        hidden_dim=256,
     )
 
     module_PB = MLP(
@@ -72,7 +83,10 @@ def main(args, config):
         module_PB, env.n_actions, preprocessor=preprocessor, is_backward=True
     )
 
+    # test DBGflownet on the long sequence
+
     gflownet = TBGFlowNet(pf=pf_estimator, pb=pb_estimator, logZ=0.0)
+
 
     sampler = Sampler(estimator=pf_estimator)
     gflownet = gflownet.to(env.device)
@@ -94,7 +108,7 @@ def main(args, config):
     start_time = time.time()
 
     loss_history, reward_history, reward_components, unique_seqs = train(
-        args, config, env, gflownet, sampler, optimizer, scheduler, device
+        args, env, gflownet, sampler, optimizer, scheduler, device
     )
 
     total_time = time.time() - start_time
@@ -155,15 +169,17 @@ def main(args, config):
 
     logging.info("Plotting final metric histograms and Pareto front...")
 
-    plot_metric_histograms(
-        gc_list, mfe_list, cai_list, out_path="metric_distributions.png"
-    )
-    plot_pareto_front(gc_list, mfe_list, cai_list, out_path="pareto_scatter.png")
-    plot_cai_vs_mfe(cai_list, mfe_list, out_path="cai_vs_mfe.png")
-    plot_gc_vs_mfe(gc_list, mfe_list, out_path="gc_vs_mfe.png")
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M")
 
-    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    filename = f"outputs/generated_sequences_{timestamp}.txt"
+    plot_metric_histograms(
+        gc_list, mfe_list, cai_list, out_path=f"outputs_{config.type}/metric_distributions_{timestamp}.png"
+    )
+    plot_pareto_front(gc_list, mfe_list, cai_list, out_path=f"outputs_{config.type}/pareto_scatter_{timestamp}.png")
+    plot_cai_vs_mfe(cai_list, mfe_list, out_path = f"outputs_{config.type}/cai_vs_mfe_{timestamp}.png")
+    plot_gc_vs_mfe(gc_list, mfe_list, out_path= f"outputs_{config.type}/gc_vs_mfe_{timestamp}.png")
+
+
+    filename = f"outputs_{config.type}/generated_sequences_{timestamp}.txt"
 
     logging.info(f"Saving generated sequences to {filename}")
     sorted_samples = sorted(samples.items(), key=lambda x: x[1][0], reverse=True)
@@ -263,16 +279,16 @@ def main(args, config):
         logging.info("Logging evaluation metrics to WandB...")
         wandb.log(
             {
-                "Pareto Plot": wandb.Image("pareto_scatter.png"),
+                "Pareto Plot": wandb.Image(f"outputs_{config.type}/pareto_scatter_{timestamp}.png"),
                 "Training_time": total_time,
                 "Inference_time": inference_time,
                 "Avg_time_per_sequence": avg_time_per_seq,
-                "Reward Metric distributions": wandb.Image("metric_distributions.png"),
+                "Reward Metric distributions": wandb.Image(f"outputs_{config.type}/metric_distributions_{timestamp}.png"),
                 "edit_distance_distribution": wandb.Image(
                     "edit_distance_distribution.png"
                 ),
-                "CAI vs MFE": wandb.Image("cai_vs_mfe.png"),
-                "GC vs MFE": wandb.Image("gc_vs_mfe.png"),
+                "CAI vs MFE": wandb.Image( f"outputs_{config.type}/cai_vs_mfe_{timestamp}.png"),
+                "GC vs MFE": wandb.Image(f"outputs_{config.type}/gc_vs_mfe_{timestamp}.png"),
                 "mean_edit_distance": np.mean(distances),
                 "std_edit_distance": np.std(distances),
                 "Eval_mean_gc": eval_mean_gc,
@@ -295,53 +311,22 @@ if __name__ == "__main__":
     parser.add_argument("--no_cuda", action="store_true", help="Prevent CUDA usage")
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
 
-    parser.add_argument(
-        "--lr",
-        type=float,
-        default=1e-2,
-        help="Learning rate for the estimators' modules",
-    )
-    parser.add_argument(
-        "--lr_logz",
-        type=float,
-        default=1e-1,
-        help="Learning rate for the logZ parameter",
-    )
+    parser.add_argument("--lr",type=float,default=1e-3,help="Learning rate for the estimators' modules",)
+    parser.add_argument("--lr_logz",type=float,default=1e-1,help="Learning rate for the logZ parameter",)
 
-    parser.add_argument(
-        "--n_iterations", type=int, default=100, help="Number of iterations"
-    )
-    parser.add_argument(
-        "--n_samples", type=int, default=100, help="Number of samples to generate"
-    )
+    parser.add_argument("--n_iterations", type=int, default=100, help="Number of iterations")
+    parser.add_argument("--n_samples", type=int, default=100, help="Number of samples to generate")
+    parser.add_argument("--batch_size", type=int, default=8, help="Batch size")
 
-    parser.add_argument("--batch_size", type=int, default=2, help="Batch size")
-    parser.add_argument(
-        "--epsilon", type=float, default=0.1, help="Epsilon for the sampler"
-    )
+    parser.add_argument("--epsilon", type=float, default=0.2, help="Epsilon for the sampler")
 
-    parser.add_argument(
-        "--embedding_dim", type=int, default=32, help="Dimension of codon embeddings"
-    )
-    parser.add_argument(
-        "--hidden_dim", type=int, default=256, help="Hidden dimension of the networks"
-    )
-    parser.add_argument(
-        "--n_hidden", type=int, default=2, help="Number of hidden layers"
-    )
+    parser.add_argument("--embedding_dim", type=int, default=32, help="Dimension of codon embeddings")
+    parser.add_argument("--hidden_dim", type=int, default=256, help="Hidden dimension of the networks")
+    parser.add_argument("--n_hidden", type=int, default=2, help="Number of hidden layers")
 
-    parser.add_argument(
-        "--tied", action="store_true", help="Whether to tie the parameters of PF and PB"
-    )
-    parser.add_argument(
-        "--clip_grad_norm", type=float, default=1.0, help="Gradient clipping norm"
-    )
-    parser.add_argument(
-        "--lr_patience",
-        type=int,
-        default=10,
-        help="Patience for learning rate scheduler",
-    )
+    parser.add_argument("--tied", action="store_true", help="Whether to tie the parameters of PF and PB")
+    parser.add_argument("--clip_grad_norm", type=float, default=1.0, help="Gradient clipping norm")
+    parser.add_argument("--lr_patience",type=int,default=10,help="Patience for learning rate scheduler",)
 
     parser.add_argument("--wandb_project", type=str, default="mRNA_design", help="Weights & Biases project name")
     parser.add_argument("--run_name", type=str, default="", help="Name for the wandb run")

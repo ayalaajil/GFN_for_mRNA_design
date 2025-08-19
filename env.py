@@ -8,9 +8,9 @@ from utils import (
     compute_cai,
     get_synonymous_indices,
 )
-from torchgfn.src.gfn.actions import Actions
-from torchgfn.src.gfn.states import DiscreteStates
-from torchgfn.src.gfn.env import DiscreteEnv
+from gfn.actions import Actions
+from gfn.states import DiscreteStates
+from gfn.env import DiscreteEnv
 from typing import Union
 
 
@@ -92,7 +92,6 @@ class CodonDesignEnv(DiscreteEnv):
         max_length = states_tensor.shape[1]
         new_states = states_tensor.clone()
         valid_actions = actions.tensor.squeeze(-1)
-
         for i in range(batch_size):
 
             if (
@@ -100,7 +99,6 @@ class CodonDesignEnv(DiscreteEnv):
                 and valid_actions[i].item() != self.exit_action_index
             ):
                 new_states[i, int(current_length[i].item())] = valid_actions[i].item()
-
         return self.States(new_states)
 
     def backward_step(
