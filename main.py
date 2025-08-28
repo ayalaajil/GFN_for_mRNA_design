@@ -8,8 +8,10 @@ from train import train
 from evaluate import evaluate
 from plots import *
 from datetime import datetime
+from transformers.optimization import get_linear_schedule_with_warmup
 
 from utils import *
+from DeepArchi import *
 import logging
 import torch
 import argparse
@@ -17,8 +19,8 @@ import numpy as np
 import time
 import wandb
 from comparison import analyze_sequence_properties
-from torchgfn.src.gfn.gflownet import TBGFlowNet
-from torchgfn.src.gfn.modules import DiscretePolicyEstimator
+from torchgfn.src.gfn.gflownet import TBGFlowNet, SubTBGFlowNet
+from torchgfn.src.gfn.modules import DiscretePolicyEstimator, Estimator, ScalarEstimator
 from torchgfn.src.gfn.utils.modules import MLP
 from torchgfn.src.gfn.samplers import Sampler
 
@@ -28,6 +30,25 @@ logging.basicConfig(
     format="%(asctime)s | %(levelname)s | %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
 )
+
+def set_up_logF_estimator(
+    args, preprocessor, pf_module
+):
+    """Returns a LogStateFlowEstimator."""
+
+    module = MLP(
+            input_dim=preprocessor.output_dim,
+            output_dim=1,
+            hidden_dim=args.hidden_dim,
+            n_hidden_layers=args.n_hidden,
+            trunk=(
+                pf_module.trunk
+                if args.tied and isinstance(pf_module.trunk, torch.nn.Module)
+                else None
+            ),
+        )
+
+    return ScalarEstimator(module=module, preprocessor=preprocessor)
 
 
 def main(args, config):
@@ -62,11 +83,14 @@ def main(args, config):
         n_hidden_layers=args.n_hidden,
     )
 
-    module_PF = MLP(
-        input_dim=preprocessor.output_dim,
-        output_dim=env.n_actions,
-        hidden_dim=256,
-    )
+    # module_PF = TransformerModel(
+    #     input_dim=preprocessor.output_dim,
+    #     hidden_dim=args.hidden_dim,
+    #     output_dim=env.n_actions,
+    #     n_layers=args.n_hidden,
+    #     n_head=8
+    #     )
+
 
     module_PB = MLP(
         input_dim=preprocessor.output_dim,
@@ -83,18 +107,41 @@ def main(args, config):
         module_PB, env.n_actions, preprocessor=preprocessor, is_backward=True
     )
 
-    # test DBGflownet on the long sequence
+    logF_estimator = set_up_logF_estimator(args,preprocessor,pf_estimator)
 
-    gflownet = TBGFlowNet(pf=pf_estimator, pb=pb_estimator, logZ=0.0)
+
+    # gflownet = TBGFlowNet(pf=pf_estimator, pb=pb_estimator, logZ=0.0)
+
+    gflownet =  SubTBGFlowNet(
+                    pf=pf_estimator,
+                    pb=pb_estimator,
+                    logF=logF_estimator,
+                    weighting=args.subTB_weighting,
+                    lamda=args.subTB_lambda,)
 
 
     sampler = Sampler(estimator=pf_estimator)
     gflownet = gflownet.to(env.device)
 
-    optimizer = torch.optim.Adam(gflownet.pf_pb_parameters(), lr=args.lr)
-    optimizer.add_param_group(
-        {"params": gflownet.logz_parameters(), "lr": args.lr_logz}
-    )
+    non_logz_params = [
+        v for k, v in dict(gflownet.named_parameters()).items() if k != "logZ"
+    ]
+    if "logZ" in dict(gflownet.named_parameters()):
+        logz_params = [dict(gflownet.named_parameters())["logZ"]]
+    else:
+        logz_params = []
+
+    params = [
+        {"params": non_logz_params, "lr": args.lr},
+        {"params": logz_params, "lr": args.lr_logz},
+    ]
+    optimizer = torch.optim.Adam(params)
+
+
+    # optimizer = torch.optim.AdamW(gflownet.pf_pb_parameters(), lr=args.lr, weight_decay=1e-4)
+    # optimizer.add_param_group(
+    #     {"params": gflownet.logz_parameters(), "lr": args.lr_logz, "weight_decay": 0.0}
+    # )
 
     loss_history = []
     reward_history = []
@@ -209,7 +256,7 @@ def main(args, config):
         table.add_data(
             i + 1,
             seq,
-            reward[0].item(),
+            reward[0],
             reward[1][0],
             reward[1][1],
             reward[1][2],
@@ -219,7 +266,7 @@ def main(args, config):
     table.add_data(
         31,
         best_gc[0],
-        best_gc[1][0].item(),
+        best_gc[1][0],
         best_gc[1][1][0],
         best_gc[1][1][1],
         best_gc[1][1][2],
@@ -228,7 +275,7 @@ def main(args, config):
     table.add_data(
         32,
         best_mfe[0],
-        best_mfe[1][0].item(),
+        best_mfe[1][0],
         best_mfe[1][1][0],
         best_mfe[1][1][1],
         best_mfe[1][1][2],
@@ -237,7 +284,7 @@ def main(args, config):
     table.add_data(
         33,
         best_cai[0],
-        best_cai[1][0].item(),
+        best_cai[1][0],
         best_cai[1][1][0],
         best_cai[1][1][1],
         best_cai[1][1][2],
@@ -311,18 +358,31 @@ if __name__ == "__main__":
     parser.add_argument("--no_cuda", action="store_true", help="Prevent CUDA usage")
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
 
-    parser.add_argument("--lr",type=float,default=1e-3,help="Learning rate for the estimators' modules",)
+    parser.add_argument(
+        "--subTB_weighting",
+        type=str,
+        default="geometric_within",
+        help="weighting scheme for SubTB",
+    )
+
+    parser.add_argument(
+        "--subTB_lambda", type=float, default=0.9, help="Lambda parameter for SubTB"
+    )
+
+    parser.add_argument("--lr", type=float,default=0.0005, help="Learning rate for the estimators' modules",)
     parser.add_argument("--lr_logz",type=float,default=1e-1,help="Learning rate for the logZ parameter",)
 
-    parser.add_argument("--n_iterations", type=int, default=100, help="Number of iterations")
+    parser.add_argument("--n_iterations", type=int, default=1000, help="Number of iterations")
     parser.add_argument("--n_samples", type=int, default=100, help="Number of samples to generate")
+
     parser.add_argument("--batch_size", type=int, default=8, help="Batch size")
 
-    parser.add_argument("--epsilon", type=float, default=0.2, help="Epsilon for the sampler")
+    parser.add_argument("--epsilon", type=float, default=0.25, help="Epsilon for the sampler")
 
-    parser.add_argument("--embedding_dim", type=int, default=32, help="Dimension of codon embeddings")
-    parser.add_argument("--hidden_dim", type=int, default=256, help="Hidden dimension of the networks")
-    parser.add_argument("--n_hidden", type=int, default=2, help="Number of hidden layers")
+    parser.add_argument("--embedding_dim", type=int, default=64, help="Dimension of codon embeddings")
+    parser.add_argument("--hidden_dim", type=int, default=64, help="Hidden dimension of the networks")
+
+    parser.add_argument("--n_hidden", type=int, default=3, help="Number of hidden layers")
 
     parser.add_argument("--tied", action="store_true", help="Whether to tie the parameters of PF and PB")
     parser.add_argument("--clip_grad_norm", type=float, default=1.0, help="Gradient clipping norm")
@@ -337,6 +397,7 @@ if __name__ == "__main__":
     config = load_config(args.config_path)
 
     main(args, config)
+
 
 
 

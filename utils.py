@@ -2,9 +2,10 @@ from MFE_calculator import RNAFolder
 from CAI_calculator import CAICalculator
 import torch
 import yaml
-
+import numpy as np
 from types import SimpleNamespace
-from typing import List, Dict
+from typing import List, Tuple, Optional, Dict, Any, Sequence
+import math
 
 # --- Biological Constants ---
 
@@ -183,11 +184,143 @@ def compute_reward_components(state, codon_gc_counts):
     cai_score = compute_cai(state).item()
     return gc_content, mfe_energy, cai_score
 
+def compute_reward(
+    state,
+    codon_gc_counts,
+    weights: Sequence[float],
+    *,
+    gc_target: float = 0.50,    # target GC content (fraction)
+    gc_width: float = 0.10,     # Gaussian width for GC reward
+    mfe_min: float = -500.0,    # lower bound for MFE scaling (most negative)
+    mfe_max: float = 0.0,       # upper bound for MFE scaling
+    cai_min: float = 0.0,       # min CAI for scaling
+    cai_max: float = 1.0,       # max CAI for scaling
+) -> Tuple[float, Tuple[float, float, float]]:
 
-def compute_reward(state, codon_gc_counts, weights):
-    gc, mfe, cai = compute_reward_components(state, codon_gc_counts)
-    reward = sum(w * r for w, r in zip(weights, [gc, -mfe, cai]))  # weighted sum
-    return reward, (gc, mfe, cai)
+    gc_val, mfe_val, cai_val = compute_reward_components(state, codon_gc_counts)
+
+    # --- normalize---
+    # 1) GC reward: gaussian around gc_target
+    if gc_width == 0:
+        gc_reward = 1.0 if math.isclose(gc_val, gc_target) else 0.0
+    else:
+        gc_reward = math.exp(-0.5 * ((gc_val - gc_target) / gc_width) ** 2)
+
+    # 2) MFE reward: scaled to [0,1] with clipping then inverted (lower MFE -> higher reward)
+    mfe_span = mfe_max - mfe_min
+    if mfe_span == 0:
+        mfe_scaled = 0.0
+    else:
+        mfe_scaled = (mfe_val - mfe_min) / mfe_span
+    mfe_scaled = float(np.clip(mfe_scaled, 0.0, 1.0))
+    mfe_reward = 1.0 - mfe_scaled
+
+    # 3) CAI reward: scaled to [0,1] with clipping (higher CAI -> higher reward)
+    cai_span = cai_max - cai_min
+    if cai_span == 0:
+        cai_reward = 0.0
+    else:
+        cai_reward = float(np.clip((cai_val - cai_min) / cai_span, 0.0, 1.0))
+
+    # --- weights and final reward ---
+    if len(weights) != 3:
+        raise ValueError("weights must be length-3 for [gc, mfe, cai]")
+
+    w = [float(wi) for wi in weights]
+    comp_rewards = [gc_reward, mfe_reward, cai_reward]
+    reward = float(w[0] * comp_rewards[0] + w[1] * comp_rewards[1] + w[2] * comp_rewards[2])
+
+    if not math.isfinite(reward):
+        reward = float(np.clip(reward, -1e9, 1e9))
+
+    return reward, (gc_val, mfe_val, cai_val)
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# def compute_reward(
+#     state,
+#     codon_gc_counts,
+#     weights: Sequence[float],
+#     *,
+#     clip: Tuple[float, float] = (-100.0, 100.0),
+#     normalize: Optional[str] = None,
+#     stats: Optional[Dict[str, Any]] = None,
+# ) -> Tuple[float, Tuple[float, float, float]]:
+#     """
+#     Compute weighted reward from components for a single state.
+
+#     Args:
+#       state: sequence representation (tensor / list / numpy) accepted by your compute_* helpers.
+#       codon_gc_counts: used by compute_gc_content_vectorized.
+#       weights: sequence-like of length 3 for [gc, -mfe, cai] respectively.
+#       clip: (min, max) clipping applied to each component before weighting.
+#       normalize: optional normalization mode: None | "zscore" | "minmax".
+#         If specified, `stats` must be provided with required fields:
+#           - for "zscore": stats = {"means": (m_gc, m_mfe_inv, m_cai), "stds": (s_gc, s_mfe_inv, s_cai)}
+#           - for "minmax": stats = {"mins": (min_gc, min_mfe_inv, min_cai), "maxs": (...)}
+#       stats: optional dict used by normalization.
+
+#     Returns:
+#       (reward, (gc, mfe, cai)) where reward is a plain Python float and
+#       components are the raw (gc, mfe, cai) values (mfe is raw negative energy).
+#     """
+#     gc, mfe, cai = compute_reward_components(state, codon_gc_counts)
+
+#     comp = [float(gc), float(-mfe), float(cai)]
+
+#     min_clip, max_clip = clip
+#     comp = [max(min(c, max_clip), min_clip) for c in comp]
+
+#     if normalize is not None:
+#         if stats is None:
+#             raise ValueError("stats must be provided when normalize is set")
+#         if normalize == "zscore":
+#             means = stats.get("means")
+#             stds = stats.get("stds")
+#             if means is None or stds is None:
+#                 raise ValueError("stats must contain 'means' and 'stds' for zscore normalization")
+#             comp = [(c - m) / (s if s != 0.0 else 1.0) for c, m, s in zip(comp, means, stds)]
+#         elif normalize == "minmax":
+#             mins = stats.get("mins")
+#             maxs = stats.get("maxs")
+#             if mins is None or maxs is None:
+#                 raise ValueError("stats must contain 'mins' and 'maxs' for minmax normalization")
+#             comp = [
+#                 (c - mn) / (mx - mn) if (mx - mn) != 0.0 else 0.0
+#                 for c, mn, mx in zip(comp, mins, maxs)
+#             ]
+#         else:
+#             raise ValueError(f"Unknown normalize mode: {normalize}")
+
+#     if len(weights) != 3:
+#         raise ValueError("weights must be length-3 for [gc, -mfe, cai]")
+
+#     try:
+#         w = [float(x) for x in weights]
+#     except Exception:
+#         w = [float(torch.as_tensor(weights[i]).item()) if 'torch' in globals() else float(weights[i]) for i in range(3)]
+
+#     reward = sum(w_i * c_i for w_i, c_i in zip(w, comp))
+
+#     if not (isinstance(reward, (float, int)) and math.isfinite(float(reward))):
+#         reward = float(max(min(reward, max_clip), min_clip))
+
+#     return float(reward), (gc, mfe, cai)

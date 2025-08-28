@@ -1,12 +1,1 @@
-- algorithm=mogfn
-- task=nupack_energy_pins_pairs
-- tokenizer=aptamer
-- algorithm.train_steps=10000
-- task.min_len=30
-- task.max_len=60
-- algorithm.beta_cond=False
-- algorithm.sample_beta=80
-- algorithm.beta_max=42
-- algorithm.simplex_bins=50
-- seed=1
-- algorithm.state_save_path=results/state.pt
+[]

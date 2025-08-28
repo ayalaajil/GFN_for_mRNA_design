@@ -111,23 +111,11 @@ hydra:
   overrides:
     hydra:
     - hydra.mode=RUN
-    task:
-    - algorithm=mogfn
-    - task=nupack_energy_pins_pairs
-    - tokenizer=aptamer
-    - algorithm.train_steps=10000
-    - task.min_len=30
-    - task.max_len=60
-    - algorithm.beta_cond=False
-    - algorithm.sample_beta=80
-    - algorithm.beta_max=42
-    - algorithm.simplex_bins=50
-    - seed=1
-    - algorithm.state_save_path=results/state.pt
+    task: []
   job:
-    name: main
+    name: train_mrna
     chdir: null
-    override_dirname: algorithm.beta_cond=False,algorithm.beta_max=42,algorithm.sample_beta=80,algorithm.simplex_bins=50,algorithm.state_save_path=results/state.pt,algorithm.train_steps=10000,algorithm=mogfn,seed=1,task.max_len=60,task.min_len=30,task=nupack_energy_pins_pairs,tokenizer=aptamer
+    override_dirname: ''
     id: ???
     num: ???
     config_name: main
@@ -140,7 +128,7 @@ hydra:
         exclude_keys: []
   runtime:
     version: 1.3.2
-    version_base: '1.1'
+    version_base: '1.3'
     cwd: /home/ubuntu/aya/GFN_for_mRNA_design/MOGFN
     config_sources:
     - path: hydra.conf
@@ -154,9 +142,9 @@ hydra:
       provider: schema
     output_dir: /home/ubuntu/aya/GFN_for_mRNA_design/MOGFN/data/test
     choices:
-      tokenizer: aptamer
+      tokenizer: mrna_seq
       algorithm: mogfn
-      task: nupack_energy_pins_pairs
+      task: mrna
       hydra/env: default
       hydra/callbacks: null
       hydra/job_logging: default
