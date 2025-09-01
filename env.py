@@ -129,7 +129,11 @@ class CodonDesignEnv(DiscreteEnv):
 
         for i in range(batch_size):
 
+            # print(current_length[i])
+
             cl = current_length[i].item()
+
+            # print(cl)
 
             if cl < self.seq_length:
 
@@ -146,6 +150,8 @@ class CodonDesignEnv(DiscreteEnv):
                 last_codon = states_tensor[i, int(cl) - 1].item()
                 if last_codon >= 0:
                     backward_masks[i, int(last_codon)] = True
+
+        # print(states_tensor.shape)
 
         states.forward_masks = forward_masks
         states.backward_masks = backward_masks

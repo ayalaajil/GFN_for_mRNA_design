@@ -27,6 +27,7 @@ from gfn.estimators import (
 )
 from gfn.utils.modules import MLP
 from gfn.samplers import Sampler
+from gfn.states import DiscreteStates, States
 
 
 logging.basicConfig(
@@ -58,6 +59,81 @@ def build_tb_gflownet(env, pf_estimator, pb_estimator, preprocessor, cond_dim: i
         n_hidden_layers=2,
     )
 
+def build_tb_gflownet(env, pf_estimator, pb_estimator, preprocessor, cond_dim: int = 3) -> TBGFlowNet:
+
+    module_logZ_state = MLP(
+        input_dim=preprocessor.output_dim,
+        output_dim=16,
+        hidden_dim=16,
+        n_hidden_layers=2,
+    )
+
+    module_logZ_cond = MLP(
+        input_dim=cond_dim,
+        output_dim=16,
+        hidden_dim=16,
+        n_hidden_layers=2,
+    )
+
+    module_logZ_final = MLP(
+        input_dim=32,  # 16 + 16
+        output_dim=1,
+        hidden_dim=16,
+        n_hidden_layers=2,
+    )
+
+    # # Create a wrapper class to make ConditionalScalarEstimator compatible with TBGFlowNet
+    # class ConditionalLogZWrapper(ScalarEstimator):
+    #     def __init__(self, conditional_estimator, env):
+    #         super().__init__(
+    #             conditional_estimator.module, conditional_estimator.preprocessor
+    #         )
+    #         self.conditional_estimator = conditional_estimator
+    #         self.env = env
+
+    #     def forward(self, conditioning):
+    #         # Handle different shapes of conditioning that might come from trajectories
+    #         # The conditioning might have shape variations depending on the context
+
+    #         # First, ensure conditioning is at least 2D
+    #         if conditioning.ndim == 1:
+    #             conditioning = conditioning.unsqueeze(0)
+
+    #         # If conditioning has 3 dimensions (e.g., from trajectories with time steps),
+    #         # we need to handle it appropriately
+    #         if conditioning.ndim == 3:
+    #             # Shape might be (batch_size, seq_length, cond_dim) or similar
+    #             # For logZ calculation, we typically want just (batch_size, cond_dim)
+    #             # Take the first time step or average across time
+    #             if conditioning.shape[1] > 1:
+    #                 # If multiple time steps, use the first one (or could use mean)
+    #                 conditioning = conditioning[:, 0, :]  # Shape: (batch_size, cond_dim)
+    #             else:
+    #                 conditioning = conditioning.squeeze(1)  # Remove singleton dimension
+
+    #         batch_size = conditioning.shape[0]
+
+    #         # Create dummy states with the correct batch size
+    #         dummy_states = self.env.reset(batch_shape=(batch_size,))
+
+    #         # Now call the conditional estimator with proper states and conditioning
+    #         return self.conditional_estimator(dummy_states, conditioning)
+
+
+    # conditional_logZ = ConditionalScalarEstimator(
+    #     module_logZ_state,
+    #     module_logZ_cond,
+    #     module_logZ_final,
+    #     preprocessor=preprocessor,
+    # )
+    # logZ_estimator = ConditionalLogZWrapper(conditional_logZ, env)
+
+    # gflownet = TBGFlowNet(logZ=logZ_estimator, pf=pf_estimator, pb=pb_estimator)
+
+    # return gflownet
+
+
+
     # Create a wrapper class to make ConditionalScalarEstimator compatible with TBGFlowNet
     class ConditionalLogZWrapper(ScalarEstimator):
         def __init__(self, conditional_estimator, env):
@@ -68,15 +144,23 @@ def build_tb_gflownet(env, pf_estimator, pb_estimator, preprocessor, cond_dim: i
             self.env = env
 
         def forward(self, conditioning):
+
             # Create dummy states for the conditional estimator
             # The conditional estimator expects states, but we only have conditioning
             # We'll create dummy states with the same batch shape as conditioning
+
             batch_shape = (
                 conditioning.shape[:-1]
                 if len(conditioning.shape) > 1
                 else conditioning.shape
             )
+
+            print('After the wrapper')
+            print(batch_shape)
+            print(conditioning.shape)
+
             dummy_states = self.env.reset(batch_shape)
+            print(self.conditional_estimator(dummy_states, conditioning))
             return self.conditional_estimator(dummy_states, conditioning)
 
     conditional_logZ = ConditionalScalarEstimator(

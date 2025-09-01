@@ -2,9 +2,10 @@ import sys
 import os
 sys.path.insert(0,os.path.join(os.path.dirname(__file__), 'torchgfn', 'src'))
 
+import itertools
 from env import CodonDesignEnv
 from preprocessor import CodonSequencePreprocessor
-from train import train
+from train import *
 from evaluate import evaluate
 from plots import *
 from datetime import datetime
@@ -23,6 +24,8 @@ from torchgfn.src.gfn.gflownet import TBGFlowNet, SubTBGFlowNet
 from torchgfn.src.gfn.modules import DiscretePolicyEstimator, Estimator, ScalarEstimator
 from torchgfn.src.gfn.utils.modules import MLP
 from torchgfn.src.gfn.samplers import Sampler
+
+from ENN_ENH import MLP_ENN
 
 
 logging.basicConfig(
@@ -57,12 +60,9 @@ def main(args, config):
     logging.info(f"Using device: {device}")
 
     if config.wandb_project:
+
         logging.info("Initializing Weights & Biases...")
-        wandb.init(
-            project=config.wandb_project,
-            config=vars(config),
-            name=config.run_name if config.run_name else None,
-        )
+        wandb.init(project= config.wandb_project,config={**vars(config), **vars(args)},name= config.run_name)
 
     start_time = time.time()
     logging.info("Creating environment...")
@@ -76,41 +76,68 @@ def main(args, config):
     logging.info("Building GFlowNet model...")
 
 
-    module_PF = MLP(
-        input_dim=preprocessor.output_dim,
-        output_dim=env.n_actions,
-        hidden_dim=args.hidden_dim,
-        n_hidden_layers=args.n_hidden,
-    )
+    arch = getattr(config, 'arch', 'MLP')
 
-    # module_PF = TransformerModel(
-    #     input_dim=preprocessor.output_dim,
-    #     hidden_dim=args.hidden_dim,
-    #     output_dim=env.n_actions,
-    #     n_layers=args.n_hidden,
-    #     n_head=8
-    #     )
+    if arch == 'MLP_EHH':
 
+            module_PF = MLP_ENN(
+                    input_dim=preprocessor.output_dim,
+                    output_dim=env.n_actions,
+                    hidden_dim=args.hidden_dim,
+                    n_hidden_layers=args.n_hidden,
+                )
 
-    module_PB = MLP(
-        input_dim=preprocessor.output_dim,
-        output_dim=env.n_actions - 1,
-        hidden_dim=args.hidden_dim,
-        n_hidden_layers=args.n_hidden,
-        trunk=module_PF.trunk if args.tied else None,
-    )
+            module_PB = MLP_ENN(
+                    input_dim=preprocessor.output_dim,
+                    output_dim=env.n_actions - 1,
+                    hidden_dim=args.hidden_dim,
+                    n_hidden_layers=args.n_hidden,
+                    trunk=module_PF.trunk if args.tied else None,
+                )
+
+    if arch == 'Transformer':
+
+            module_PF = TransformerModel(
+                    input_dim=preprocessor.output_dim,
+                    hidden_dim=args.hidden_dim,
+                    output_dim=env.n_actions,
+                    n_layers=args.n_hidden,
+                    n_head= 8
+                    )
+
+            module_PB = MLP(
+                input_dim=preprocessor.output_dim,
+                output_dim=env.n_actions - 1,
+                hidden_dim=args.hidden_dim,
+                n_hidden_layers=args.n_hidden,
+                trunk= None,
+            )
+
+    else :
+            module_PF = MLP(
+                input_dim=preprocessor.output_dim,
+                output_dim=env.n_actions,
+                hidden_dim=args.hidden_dim,
+                n_hidden_layers=args.n_hidden,
+            )
+
+            module_PB = MLP(
+                input_dim=preprocessor.output_dim,
+                output_dim=env.n_actions - 1,
+                hidden_dim=args.hidden_dim,
+                n_hidden_layers=args.n_hidden,
+                trunk=module_PF.trunk if args.tied else None,
+            )
 
     pf_estimator = DiscretePolicyEstimator(
         module_PF, env.n_actions, preprocessor=preprocessor, is_backward=False
     )
+
     pb_estimator = DiscretePolicyEstimator(
         module_PB, env.n_actions, preprocessor=preprocessor, is_backward=True
     )
 
     logF_estimator = set_up_logF_estimator(args,preprocessor,pf_estimator)
-
-
-    # gflownet = TBGFlowNet(pf=pf_estimator, pb=pb_estimator, logZ=0.0)
 
     gflownet =  SubTBGFlowNet(
                     pf=pf_estimator,
@@ -137,12 +164,6 @@ def main(args, config):
     ]
     optimizer = torch.optim.Adam(params)
 
-
-    # optimizer = torch.optim.AdamW(gflownet.pf_pb_parameters(), lr=args.lr, weight_decay=1e-4)
-    # optimizer.add_param_group(
-    #     {"params": gflownet.logz_parameters(), "lr": args.lr_logz, "weight_decay": 0.0}
-    # )
-
     loss_history = []
     reward_history = []
 
@@ -166,7 +187,7 @@ def main(args, config):
     # plot_of_weights_over_iterations(sampled_weights)
     # plot_ternary_plot_of_weights(sampled_weights)
 
-    if config.wandb_project:
+    if args.wandb_project:
 
         logging.info("Logging training summary to WandB...")
         wandb.log(
@@ -205,26 +226,24 @@ def main(args, config):
     eval_mean_cai = float(torch.tensor(cai_list).mean())
 
     logging.info("Saving trained model and metrics...")
+
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M")
+
+    model_filename = f"trained_gflownet_{args.run_name}_{timestamp}.pth"
     torch.save(
         {
             "model_state": gflownet.state_dict(),
-            "logZ": gflownet.logZ,
             "training_history": {"loss": loss_history, "reward": reward_history},
         },
-        "trained_gflownet.pth",
+        model_filename,
     )
 
     logging.info("Plotting final metric histograms and Pareto front...")
 
-    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M")
-
-    plot_metric_histograms(
-        gc_list, mfe_list, cai_list, out_path=f"outputs_{config.type}/metric_distributions_{timestamp}.png"
-    )
+    plot_metric_histograms(gc_list, mfe_list, cai_list, out_path=f"outputs_{config.type}/metric_distributions_{timestamp}.png")
     plot_pareto_front(gc_list, mfe_list, cai_list, out_path=f"outputs_{config.type}/pareto_scatter_{timestamp}.png")
     plot_cai_vs_mfe(cai_list, mfe_list, out_path = f"outputs_{config.type}/cai_vs_mfe_{timestamp}.png")
     plot_gc_vs_mfe(gc_list, mfe_list, out_path= f"outputs_{config.type}/gc_vs_mfe_{timestamp}.png")
-
 
     filename = f"outputs_{config.type}/generated_sequences_{timestamp}.txt"
 
@@ -233,10 +252,10 @@ def main(args, config):
 
     ############################# Extract Best-by-Objective Sequences ##########################
 
-    # Get best sequences for each reward component
     best_gc = max(samples.items(), key=lambda x: x[1][1][0])  # GC content
     best_mfe = min(samples.items(), key=lambda x: x[1][1][1])  # MFE
     best_cai = max(samples.items(), key=lambda x: x[1][1][2])  # CAI
+
 
     with open(filename, "w") as f:
         for i, (seq, reward) in enumerate(sorted_samples):
@@ -298,8 +317,6 @@ def main(args, config):
     distances = analyze_diversity(sequences)
 
     generated_sequences_tensor = [tokenize_sequence_to_tensor(seq) for seq in sequences]
-
-    # best-by-objective sequences
     additional_best_seqs = [best_gc[0], best_mfe[0], best_cai[0]]
 
     for s in additional_best_seqs:
@@ -312,16 +329,14 @@ def main(args, config):
         "Best CAI",
     ]
 
-    analyze_sequence_properties(
-        generated_sequences_tensor, natural_tensor, labels=sequence_labels
-    )
+    analyze_sequence_properties(generated_sequences_tensor, natural_tensor, labels=sequence_labels)
 
     Eval_avg_reward = sum(
         w * r
         for w, r in zip(env.weights, [eval_mean_gc, -eval_mean_mfe, eval_mean_cai])
     )
 
-    if config.wandb_project:
+    if args.wandb_project:
 
         logging.info("Logging evaluation metrics to WandB...")
         wandb.log(
@@ -348,6 +363,8 @@ def main(args, config):
     wandb.summary["final_loss"] = loss_history[-1]
     wandb.summary["unique_sequences"] = len(unique_seqs)
 
+    wandb.finish()
+
     return Eval_avg_reward
 
 
@@ -358,35 +375,25 @@ if __name__ == "__main__":
     parser.add_argument("--no_cuda", action="store_true", help="Prevent CUDA usage")
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
 
-    parser.add_argument(
-        "--subTB_weighting",
-        type=str,
-        default="geometric_within",
-        help="weighting scheme for SubTB",
-    )
+    parser.add_argument("--subTB_weighting",type=str,default="geometric_within",help="weighting scheme for SubTB")
+    parser.add_argument("--subTB_lambda", type=float, default=0.8, help="Lambda parameter for SubTB")
 
-    parser.add_argument(
-        "--subTB_lambda", type=float, default=0.9, help="Lambda parameter for SubTB"
-    )
-
-    parser.add_argument("--lr", type=float,default=0.0005, help="Learning rate for the estimators' modules",)
+    parser.add_argument("--lr", type=float,default=0.005, help="Learning rate for the estimators' modules",)
     parser.add_argument("--lr_logz",type=float,default=1e-1,help="Learning rate for the logZ parameter",)
 
-    parser.add_argument("--n_iterations", type=int, default=1000, help="Number of iterations")
+    parser.add_argument("--n_iterations", type=int, default=500, help="Number of iterations")
     parser.add_argument("--n_samples", type=int, default=100, help="Number of samples to generate")
 
-    parser.add_argument("--batch_size", type=int, default=8, help="Batch size")
-
+    parser.add_argument("--batch_size", type=int, default=16, help="Batch size")
     parser.add_argument("--epsilon", type=float, default=0.25, help="Epsilon for the sampler")
-
+    
     parser.add_argument("--embedding_dim", type=int, default=64, help="Dimension of codon embeddings")
     parser.add_argument("--hidden_dim", type=int, default=64, help="Hidden dimension of the networks")
-
     parser.add_argument("--n_hidden", type=int, default=3, help="Number of hidden layers")
 
     parser.add_argument("--tied", action="store_true", help="Whether to tie the parameters of PF and PB")
     parser.add_argument("--clip_grad_norm", type=float, default=1.0, help="Gradient clipping norm")
-    parser.add_argument("--lr_patience",type=int,default=10,help="Patience for learning rate scheduler",)
+    parser.add_argument("--lr_patience", type=int, default=10, help="Patience for learning rate scheduler",)
 
     parser.add_argument("--wandb_project", type=str, default="mRNA_design", help="Weights & Biases project name")
     parser.add_argument("--run_name", type=str, default="", help="Name for the wandb run")
@@ -397,6 +404,79 @@ if __name__ == "__main__":
     config = load_config(args.config_path)
 
     main(args, config)
+
+
+
+
+
+
+
+# if __name__ == "__main__":
+
+#     parser = argparse.ArgumentParser()
+
+#     parser.add_argument("--config_path", type=str, default="config.yaml")
+#     parser.add_argument("--wandb_project", type=str, default="med_seq_ablation_study", help="Weights & Biases project name")
+#     parser.add_argument("--run_name", type=str, default="", help="Name for the wandb run")
+#     args = parser.parse_args()
+
+
+#     config = load_config(args.config_path)
+
+#     hyperparams = {
+#         #"arch": ["MLP", "MLP_EHH", "Transformer"],
+#         "arch": ["Transformer"],
+#         "subTB_lambda": [0.8, 0.9, 0.99],
+#         "batch_size": [16, 32, 64],
+#         "lr": [0.0005, 0.001, 0.005],
+#         "hidden_dim": [64, 128, 256]
+#     }
+
+#     param_grid = list(itertools.product(
+#         hyperparams["arch"],
+#         hyperparams["subTB_lambda"],
+#         hyperparams["batch_size"],
+#         hyperparams["lr"],
+#         hyperparams["hidden_dim"]
+#     ))
+
+#     for arch, lm, bs, lr, hd in param_grid:
+
+#         run_name = (
+#             f"{arch}_"
+#             f"lambda{lm}_"
+#             f"bs{bs}_"
+#             f"lr{lr}_"
+#             f"hd{hd}"
+#         )
+
+#         print(f"\n=== Running: {run_name} ===")
+
+#         class DummyArgs: pass
+#         run_args = DummyArgs()
+#         run_args.__dict__.update({
+#             "batch_size": bs,
+#             "lr": lr,
+#             "lr_logz": 0.1,
+#             "embedding_dim": 64,
+#             "hidden_dim": hd,
+#             "n_hidden": 3,
+#             "n_iterations": 500,
+#             "n_samples": 100,
+#             "subTB_weighting": "geometric_within",
+#             "subTB_lambda": lm,
+#             "epsilon": 0.25,
+#             "tied": False,
+#             "clip_grad_norm": 1.0,
+#             "lr_patience": 10,
+
+#             # wandb logging
+#             "wandb_project": args.wandb_project or config.wandb_project,
+#             "run_name": run_name,
+
+#         })
+
+#         main(run_args, config)
 
 
 

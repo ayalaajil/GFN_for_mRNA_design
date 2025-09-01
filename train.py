@@ -28,15 +28,17 @@ def train_conditional_gfn(args, env, gflownet, sampler, optimizer, scheduler, de
         conditioning = (torch.tensor(weights, dtype=torch.get_default_dtype(), device=device))
         conditioning = conditioning.unsqueeze(0).expand(args.batch_size, *conditioning.shape)
 
+        print(conditioning.shape)
 
         # conditioning = conditioning.expand((env.seq_length+2,) + conditioning.shape)
 
         # 3) sample trajectories *with conditioning*
-        trajectories = sampler.sample_trajectories(
+        trajectories = gflownet.sample_trajectories(
             env,
-            args.batch_size,
+            n=args.batch_size,
             conditioning=conditioning,
             save_logprobs=True,
+            save_estimator_outputs=True,
             epsilon=args.epsilon,
         )
         optimizer.zero_grad()
@@ -123,7 +125,7 @@ def train(args, env, gflownet, sampler, optimizer, scheduler, device):
         for state in final_states:
 
             state = state.to(device)
-            
+
             r, c = compute_reward(
                 state, env.codon_gc_counts, env.weights
             )  # (gc, mfe, cai)
