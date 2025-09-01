@@ -16,7 +16,7 @@ from plots import *
 from env import CodonDesignEnv
 from preprocessor import CodonSequencePreprocessor
 from train import *
-from evaluate import evaluate
+from evaluate import *
 
 from gfn.gflownet import TBGFlowNet
 
@@ -28,6 +28,53 @@ from gfn.estimators import (
 from gfn.utils.modules import MLP
 from gfn.samplers import Sampler
 from gfn.states import DiscreteStates, States
+
+# Create a wrapper class to make ConditionalScalarEstimator compatible with TBGFlowNet
+class ConditionalLogZWrapper(ScalarEstimator):
+    def __init__(self, conditional_estimator, env):
+        super().__init__(
+            conditional_estimator.module, conditional_estimator.preprocessor
+        )
+        self.conditional_estimator = conditional_estimator
+        self.state_shape = env.state_shape
+        self.device = env.device
+        self.States = env.States  # Store the environment's States class
+
+    def forward(self, conditioning):
+
+        # Create dummy states for the conditional estimator
+        # The conditional estimator expects states, but we only have conditioning
+        # We'll create dummy states with the same batch shape as conditioning
+
+        # Handle different conditioning tensor shapes
+        if conditioning.ndim == 1:
+            # Single condition tensor of shape (cond_dim,)
+            batch_shape = (1,)
+            conditioning = conditioning.unsqueeze(0)  # Make it (1, cond_dim)
+        elif conditioning.ndim == 2:
+            # Batch of conditions of shape (batch_size, cond_dim)
+            batch_shape = (conditioning.shape[0],)
+        elif conditioning.ndim == 3:
+            # The conditioning tensor has been expanded by the sampler to (max_length, n_trajectories, cond_dim)
+            # For logZ calculation, we want the batch size to be n_trajectories
+            # We can take any time step since the conditioning should be the same across time
+            batch_shape = (conditioning.shape[1],)  # n_trajectories
+            conditioning = conditioning[0, :, :]  # Take first time step: (n_trajectories, cond_dim)
+        else:
+            raise ValueError(f"Unexpected conditioning tensor shape: {conditioning.shape}")
+
+        # Create dummy states manually instead of using env.reset()
+        dummy_states_tensor = torch.full(
+            (batch_shape[0],) + self.state_shape, 
+            fill_value=-1, 
+            dtype=torch.long, 
+            device=self.device
+        )
+        
+        dummy_states = self.States(dummy_states_tensor)
+        
+        result = self.conditional_estimator(dummy_states, conditioning)
+        return result
 
 
 logging.basicConfig(
@@ -82,86 +129,7 @@ def build_tb_gflownet(env, pf_estimator, pb_estimator, preprocessor, cond_dim: i
         n_hidden_layers=2,
     )
 
-    # # Create a wrapper class to make ConditionalScalarEstimator compatible with TBGFlowNet
-    # class ConditionalLogZWrapper(ScalarEstimator):
-    #     def __init__(self, conditional_estimator, env):
-    #         super().__init__(
-    #             conditional_estimator.module, conditional_estimator.preprocessor
-    #         )
-    #         self.conditional_estimator = conditional_estimator
-    #         self.env = env
 
-    #     def forward(self, conditioning):
-    #         # Handle different shapes of conditioning that might come from trajectories
-    #         # The conditioning might have shape variations depending on the context
-
-    #         # First, ensure conditioning is at least 2D
-    #         if conditioning.ndim == 1:
-    #             conditioning = conditioning.unsqueeze(0)
-
-    #         # If conditioning has 3 dimensions (e.g., from trajectories with time steps),
-    #         # we need to handle it appropriately
-    #         if conditioning.ndim == 3:
-    #             # Shape might be (batch_size, seq_length, cond_dim) or similar
-    #             # For logZ calculation, we typically want just (batch_size, cond_dim)
-    #             # Take the first time step or average across time
-    #             if conditioning.shape[1] > 1:
-    #                 # If multiple time steps, use the first one (or could use mean)
-    #                 conditioning = conditioning[:, 0, :]  # Shape: (batch_size, cond_dim)
-    #             else:
-    #                 conditioning = conditioning.squeeze(1)  # Remove singleton dimension
-
-    #         batch_size = conditioning.shape[0]
-
-    #         # Create dummy states with the correct batch size
-    #         dummy_states = self.env.reset(batch_shape=(batch_size,))
-
-    #         # Now call the conditional estimator with proper states and conditioning
-    #         return self.conditional_estimator(dummy_states, conditioning)
-
-
-    # conditional_logZ = ConditionalScalarEstimator(
-    #     module_logZ_state,
-    #     module_logZ_cond,
-    #     module_logZ_final,
-    #     preprocessor=preprocessor,
-    # )
-    # logZ_estimator = ConditionalLogZWrapper(conditional_logZ, env)
-
-    # gflownet = TBGFlowNet(logZ=logZ_estimator, pf=pf_estimator, pb=pb_estimator)
-
-    # return gflownet
-
-
-
-    # Create a wrapper class to make ConditionalScalarEstimator compatible with TBGFlowNet
-    class ConditionalLogZWrapper(ScalarEstimator):
-        def __init__(self, conditional_estimator, env):
-            super().__init__(
-                conditional_estimator.module, conditional_estimator.preprocessor
-            )
-            self.conditional_estimator = conditional_estimator
-            self.env = env
-
-        def forward(self, conditioning):
-
-            # Create dummy states for the conditional estimator
-            # The conditional estimator expects states, but we only have conditioning
-            # We'll create dummy states with the same batch shape as conditioning
-
-            batch_shape = (
-                conditioning.shape[:-1]
-                if len(conditioning.shape) > 1
-                else conditioning.shape
-            )
-
-            print('After the wrapper')
-            print(batch_shape)
-            print(conditioning.shape)
-
-            dummy_states = self.env.reset(batch_shape)
-            print(self.conditional_estimator(dummy_states, conditioning))
-            return self.conditional_estimator(dummy_states, conditioning)
 
     conditional_logZ = ConditionalScalarEstimator(
         module_logZ_state,
@@ -170,10 +138,7 @@ def build_tb_gflownet(env, pf_estimator, pb_estimator, preprocessor, cond_dim: i
         preprocessor=preprocessor,
     )
     logZ_estimator = ConditionalLogZWrapper(conditional_logZ, env)
-
     gflownet = TBGFlowNet(logZ=logZ_estimator, pf=pf_estimator, pb=pb_estimator)
-
-
     return gflownet
 
 
@@ -201,7 +166,6 @@ def main(args, config):
     logging.info("Building GFlowNet model...")
 
     CONCAT_SIZE = 16
-
     module_PF = MLP(
         input_dim=preprocessor.output_dim,
         output_dim=CONCAT_SIZE,
@@ -301,7 +265,7 @@ def main(args, config):
 
     with torch.no_grad():
 
-        samples, gc_list, mfe_list, cai_list = evaluate(
+        samples, gc_list, mfe_list, cai_list = evaluate_conditional(
             env,
             sampler,
             weights=torch.tensor([0.3, 0.3, 0.4]),
@@ -322,15 +286,17 @@ def main(args, config):
     eval_mean_mfe = float(torch.tensor(mfe_list).mean())
     eval_mean_cai = float(torch.tensor(cai_list).mean())
 
-    logging.info("Saving trained model and metrics...")
-    torch.save(
-        {
-            "model_state": gflownet.state_dict(),
-            "logZ": gflownet.logZ,
-            "training_history": {"loss": loss_history, "reward": reward_history},
-        },
-        "trained_gflownet.pth",
-    )
+    # logging.info("Saving trained model and metrics...")
+    # torch.save(
+    #     {
+    #         "model_state": gflownet.state_dict(),
+    #         "logZ": gflownet.logZ,
+    #         "training_history": {"loss": loss_history, "reward": reward_history},
+    #         "config": vars(config),  # Save config for recreating environment
+    #         "args": vars(args),      # Save args for recreating environment
+    #     },
+    #     "trained_gflownet.pth",
+    # )
 
     logging.info("Plotting final metric histograms and Pareto front...")
 
@@ -372,7 +338,7 @@ def main(args, config):
         table.add_data(
             i + 1,
             seq,
-            reward[0].item(),
+            reward[0],
             reward[1][0],
             reward[1][1],
             reward[1][2],
@@ -382,7 +348,7 @@ def main(args, config):
     table.add_data(
         31,
         best_gc[0],
-        best_gc[1][0].item(),
+        best_gc[1][0],
         best_gc[1][1][0],
         best_gc[1][1][1],
         best_gc[1][1][2],
@@ -391,7 +357,7 @@ def main(args, config):
     table.add_data(
         32,
         best_mfe[0],
-        best_mfe[1][0].item(),
+        best_mfe[1][0],
         best_mfe[1][1][0],
         best_mfe[1][1][1],
         best_mfe[1][1][2],
@@ -400,7 +366,7 @@ def main(args, config):
     table.add_data(
         33,
         best_cai[0],
-        best_cai[1][0].item(),
+        best_cai[1][0],
         best_cai[1][1][0],
         best_cai[1][1][1],
         best_cai[1][1][2],
