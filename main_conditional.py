@@ -1,13 +1,15 @@
 import sys
 import os
-sys.path.insert(0,os.path.join(os.path.dirname(__file__), 'torchgfn', 'src'))
-
-from datetime import datetime
-import logging
-import torch
-import argparse
-import numpy as np
 import time
+import logging
+import argparse
+from datetime import datetime
+from typing import Dict, Any, Tuple, List
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'torchgfn', 'src'))
+
+import torch
+import numpy as np
 import wandb
 
 from comparison import analyze_sequence_properties
@@ -15,11 +17,10 @@ from utils import *
 from plots import *
 from env import CodonDesignEnv
 from preprocessor import CodonSequencePreprocessor
-from train import *
-from evaluate import *
+from train import train_conditional_gfn
+from evaluate import evaluate_conditional
 
-from gfn.gflownet import TBGFlowNet
-
+from gfn.gflownet import TBGFlowNet, SubTBGFlowNet
 from gfn.estimators import (
     ConditionalDiscretePolicyEstimator,
     ConditionalScalarEstimator,
@@ -29,50 +30,41 @@ from gfn.utils.modules import MLP
 from gfn.samplers import Sampler
 from gfn.states import DiscreteStates, States
 
-# Create a wrapper class to make ConditionalScalarEstimator compatible with TBGFlowNet
+
+# ----------------------------- Model helper wrappers ----------------------------
 class ConditionalLogZWrapper(ScalarEstimator):
+    """Wrapper that turns a ConditionalScalarEstimator into a ScalarEstimator-like object.
+    The purpose is to allow using conditional logZ estimators with existing TBGFlowNet
+    which expects a ScalarEstimator-like interface for `logZ`.
+    """
+
     def __init__(self, conditional_estimator, env):
-        super().__init__(
-            conditional_estimator.module, conditional_estimator.preprocessor
-        )
+        super().__init__(conditional_estimator.module, conditional_estimator.preprocessor)
         self.conditional_estimator = conditional_estimator
         self.state_shape = env.state_shape
         self.device = env.device
-        self.States = env.States  # Store the environment's States class
+        self.States = env.States
 
     def forward(self, conditioning):
-
-        # Create dummy states for the conditional estimator
-        # The conditional estimator expects states, but we only have conditioning
-        # We'll create dummy states with the same batch shape as conditioning
-
-        # Handle different conditioning tensor shapes
+        # Normalize conditioning shapes (support 1D, 2D, or 3D as sampler may expand dims)
         if conditioning.ndim == 1:
-            # Single condition tensor of shape (cond_dim,)
+            conditioning = conditioning.unsqueeze(0)
             batch_shape = (1,)
-            conditioning = conditioning.unsqueeze(0)  # Make it (1, cond_dim)
         elif conditioning.ndim == 2:
-            # Batch of conditions of shape (batch_size, cond_dim)
             batch_shape = (conditioning.shape[0],)
         elif conditioning.ndim == 3:
-            # The conditioning tensor has been expanded by the sampler to (max_length, n_trajectories, cond_dim)
-            # For logZ calculation, we want the batch size to be n_trajectories
-            # We can take any time step since the conditioning should be the same across time
-            batch_shape = (conditioning.shape[1],)  # n_trajectories
-            conditioning = conditioning[0, :, :]  # Take first time step: (n_trajectories, cond_dim)
+            batch_shape = (conditioning.shape[1],)
+            conditioning = conditioning[0, :, :]
         else:
             raise ValueError(f"Unexpected conditioning tensor shape: {conditioning.shape}")
 
-        # Create dummy states manually instead of using env.reset()
         dummy_states_tensor = torch.full(
-            (batch_shape[0],) + self.state_shape, 
-            fill_value=-1, 
-            dtype=torch.long, 
-            device=self.device
+            (batch_shape[0],) + self.state_shape,
+            fill_value=-1,
+            dtype=torch.long,
+            device=self.device,
         )
-        
         dummy_states = self.States(dummy_states_tensor)
-        
         result = self.conditional_estimator(dummy_states, conditioning)
         return result
 
@@ -84,61 +76,118 @@ logging.basicConfig(
 )
 
 def build_tb_gflownet(env, pf_estimator, pb_estimator, preprocessor, cond_dim: int = 3) -> TBGFlowNet:
-
-    module_logZ_state = MLP(
-        input_dim=preprocessor.output_dim,
-        output_dim=16,
-        hidden_dim=16,
-        n_hidden_layers=2,
-    )
-
-    module_logZ_cond = MLP(
-        input_dim=cond_dim,
-        output_dim=16,
-        hidden_dim=16,
-        n_hidden_layers=2,
-    )
-
-    module_logZ_final = MLP(
-        input_dim=32,  # 16 + 16
-        output_dim=1,
-        hidden_dim=16,
-        n_hidden_layers=2,
-    )
-
-def build_tb_gflownet(env, pf_estimator, pb_estimator, preprocessor, cond_dim: int = 3) -> TBGFlowNet:
-
-    module_logZ_state = MLP(
-        input_dim=preprocessor.output_dim,
-        output_dim=16,
-        hidden_dim=16,
-        n_hidden_layers=2,
-    )
-
-    module_logZ_cond = MLP(
-        input_dim=cond_dim,
-        output_dim=16,
-        hidden_dim=16,
-        n_hidden_layers=2,
-    )
-
-    module_logZ_final = MLP(
-        input_dim=32,  # 16 + 16
-        output_dim=1,
-        hidden_dim=16,
-        n_hidden_layers=2,
-    )
-
-
+    module_logZ_state = MLP(input_dim=preprocessor.output_dim, output_dim=16, hidden_dim=16, n_hidden_layers=2)
+    module_logZ_cond = MLP(input_dim=cond_dim, output_dim=16, hidden_dim=16, n_hidden_layers=2)
+    module_logZ_final = MLP(input_dim=32, output_dim=1, hidden_dim=16, n_hidden_layers=2)
 
     conditional_logZ = ConditionalScalarEstimator(
-        module_logZ_state,
-        module_logZ_cond,
-        module_logZ_final,
-        preprocessor=preprocessor,
+        module_logZ_state, module_logZ_cond, module_logZ_final, preprocessor=preprocessor
     )
     logZ_estimator = ConditionalLogZWrapper(conditional_logZ, env)
     gflownet = TBGFlowNet(logZ=logZ_estimator, pf=pf_estimator, pb=pb_estimator)
+    return gflownet
+
+
+
+def build_conditional_pf_pb(env, preprocessor) -> Tuple[ConditionalDiscretePolicyEstimator, ConditionalDiscretePolicyEstimator]:
+
+    CONCAT_SIZE = 16
+
+    module_PF = MLP(
+        input_dim=preprocessor.output_dim,
+        output_dim=CONCAT_SIZE,
+        hidden_dim=256,
+    )
+
+    module_PB = MLP(
+        input_dim=preprocessor.output_dim,
+        output_dim=CONCAT_SIZE,
+        hidden_dim=256,
+        trunk=module_PF.trunk,
+    )
+
+    # Encoder for the Conditioning information.
+    module_cond = MLP(
+        input_dim=3,
+        output_dim=CONCAT_SIZE,
+        hidden_dim=256,
+    )
+
+    # Modules post-concatenation.
+    module_final_PF = MLP(
+        input_dim=CONCAT_SIZE * 2,
+        output_dim=env.n_actions,
+    )
+    module_final_PB = MLP(
+        input_dim=CONCAT_SIZE * 2,
+        output_dim=env.n_actions - 1,
+        trunk=module_final_PF.trunk,
+    )
+
+    pf_estimator = ConditionalDiscretePolicyEstimator(
+        module_PF,
+        module_cond,
+        module_final_PF,
+        env.n_actions,
+        preprocessor=preprocessor,
+        is_backward=False,
+    )
+    pb_estimator = ConditionalDiscretePolicyEstimator(
+        module_PB,
+        module_cond,
+        module_final_PB,
+        env.n_actions,
+        preprocessor=preprocessor,
+        is_backward=True,
+    )
+
+    return pf_estimator, pb_estimator
+
+
+def build_conditional_logF_scalar_estimator(env, preprocessor) -> ConditionalScalarEstimator:
+    """Build conditional log flow estimator.
+    Args:
+        env: The environment
+        preprocessor: The preprocessor for the environment
+    Returns:
+        A conditional scalar estimator for log flow
+    """
+
+    CONCAT_SIZE = 16
+    module_state_logF = MLP(
+        input_dim=preprocessor.output_dim,
+        output_dim=CONCAT_SIZE,
+        hidden_dim=256,
+        n_hidden_layers=1,
+    )
+    module_conditioning_logF = MLP(
+        input_dim=3,
+        output_dim=CONCAT_SIZE,
+        hidden_dim=256,
+        n_hidden_layers=1,
+    )
+    module_final_logF = MLP(
+        input_dim=CONCAT_SIZE * 2,
+        output_dim=1,
+        hidden_dim=256,
+        n_hidden_layers=1,
+    )
+
+    logF_estimator = ConditionalScalarEstimator(
+        module_state_logF,
+        module_conditioning_logF,
+        module_final_logF,
+        preprocessor=preprocessor,
+    )
+
+    return logF_estimator
+
+def build_subTB_gflownet(env, preprocessor, lamda=0.9):
+
+    pf_estimator, pb_estimator = build_conditional_pf_pb(env, preprocessor)
+    logF_estimator = build_conditional_logF_scalar_estimator(env, preprocessor)
+    gflownet = SubTBGFlowNet(logF=logF_estimator, pf=pf_estimator, pb=pb_estimator, lamda=lamda)
+
     return gflownet
 
 
@@ -159,9 +208,8 @@ def main(args, config):
     logging.info("Creating environment...")
 
     env = CodonDesignEnv(protein_seq=config.protein_seq, device=device)
-    preprocessor = CodonSequencePreprocessor(
-        env.seq_length, embedding_dim=args.embedding_dim, device=device
-    )
+    preprocessor = CodonSequencePreprocessor(env.seq_length, embedding_dim=args.embedding_dim, device=device)
+
     logging.info(f"Protein sequence length: {len(config.protein_seq)}")
     logging.info("Building GFlowNet model...")
 
@@ -216,22 +264,31 @@ def main(args, config):
         is_backward=True,
     )
 
-    gflownet = build_tb_gflownet(env, pf_estimator, pb_estimator, preprocessor, cond_dim= 3)
+    #gflownet = build_tb_gflownet(env, pf_estimator, pb_estimator, preprocessor, cond_dim= 3)
+
+    gflownet = build_subTB_gflownet(env, preprocessor, lamda=args.subTB_lambda)
 
     sampler = Sampler(estimator=pf_estimator)
     gflownet = gflownet.to(env.device)
 
-    optimizer = torch.optim.Adam(gflownet.pf_pb_parameters(), lr=args.lr)
-    optimizer.add_param_group(
-        {"params": gflownet.logz_parameters(), "lr": args.lr_logz}
-    )
+    non_logz_params = [
+        v for k, v in dict(gflownet.named_parameters()).items() if k != "logZ"
+    ]
+    if "logZ" in dict(gflownet.named_parameters()):
+        logz_params = [dict(gflownet.named_parameters())["logZ"]]
+    else:
+        logz_params = []
+
+    params = [
+        {"params": non_logz_params, "lr": args.lr},
+        {"params": logz_params, "lr": args.lr_logz},
+    ]
+    optimizer = torch.optim.Adam(params)
 
     loss_history = []
     reward_history = []
 
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode="min", factor=0.5, patience=args.lr_patience
-    )
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="min", factor=0.5, patience=args.lr_patience)
 
     logging.info("Starting training loop...")
     start_time = time.time()
@@ -268,7 +325,7 @@ def main(args, config):
         samples, gc_list, mfe_list, cai_list = evaluate_conditional(
             env,
             sampler,
-            weights=torch.tensor([0.3, 0.3, 0.4]),
+            weights=torch.tensor([0.3, 0.3, 0.4], device=device),
             n_samples=args.n_samples,
         )
 
@@ -276,9 +333,7 @@ def main(args, config):
     avg_time_per_seq = inference_time / args.n_samples
 
     logging.info(f"Inference (sampling) completed in {inference_time:.2f} seconds.")
-    logging.info(
-        f"Average time per generated sequence is {avg_time_per_seq:.2f} seconds."
-    )
+    logging.info(f"Average time per generated sequence is {avg_time_per_seq:.2f} seconds.")
 
     ################ Final means over the evaluation samples ###############
 
@@ -286,23 +341,9 @@ def main(args, config):
     eval_mean_mfe = float(torch.tensor(mfe_list).mean())
     eval_mean_cai = float(torch.tensor(cai_list).mean())
 
-    # logging.info("Saving trained model and metrics...")
-    # torch.save(
-    #     {
-    #         "model_state": gflownet.state_dict(),
-    #         "logZ": gflownet.logZ,
-    #         "training_history": {"loss": loss_history, "reward": reward_history},
-    #         "config": vars(config),  # Save config for recreating environment
-    #         "args": vars(args),      # Save args for recreating environment
-    #     },
-    #     "trained_gflownet.pth",
-    # )
-
     logging.info("Plotting final metric histograms and Pareto front...")
 
-    plot_metric_histograms(
-        gc_list, mfe_list, cai_list, out_path="metric_distributions.png"
-    )
+    plot_metric_histograms(gc_list, mfe_list, cai_list, out_path="metric_distributions.png")
     plot_pareto_front(gc_list, mfe_list, cai_list, out_path="pareto_scatter.png")
     plot_cai_vs_mfe(cai_list, mfe_list, out_path="cai_vs_mfe.png")
     plot_gc_vs_mfe(gc_list, mfe_list, out_path="gc_vs_mfe.png")
@@ -312,8 +353,6 @@ def main(args, config):
 
     logging.info(f"Saving generated sequences to {filename}")
     sorted_samples = sorted(samples.items(), key=lambda x: x[1][0], reverse=True)
-
-    ############################# Extract Best-by-Objective Sequences ##########################
 
     # Get best sequences for each reward component
     best_gc = max(samples.items(), key=lambda x: x[1][1][0])  # GC content
@@ -330,9 +369,7 @@ def main(args, config):
                 f"CAI: {reward[1][2]:.2f}\n"
             )
 
-    table = wandb.Table(
-        columns=["Index", "Sequence", "Reward", "GC Content", "MFE", "CAI", "Label"]
-    )
+    table = wandb.Table(columns=["Index", "Sequence", "Reward", "GC Content", "MFE", "CAI", "Label"])
 
     for i, (seq, reward) in enumerate(sorted_samples[:5]):
         table.add_data(
@@ -375,7 +412,6 @@ def main(args, config):
 
     wandb.log({"Top_Sequences": table})
 
-    # top_n = 50
     sequences = [seq for seq, _ in sorted_samples[:args.top_n]]
     distances = analyze_diversity(sequences)
 
@@ -394,14 +430,9 @@ def main(args, config):
         "Best CAI",
     ]
 
-    analyze_sequence_properties(
-        generated_sequences_tensor, natural_tensor, labels=sequence_labels
-    )
+    analyze_sequence_properties(generated_sequences_tensor, natural_tensor, labels=sequence_labels)
 
-    Eval_avg_reward = sum(
-        w * r
-        for w, r in zip(env.weights, [eval_mean_gc, -eval_mean_mfe, eval_mean_cai])
-    )
+    Eval_avg_reward = sum(w * r for w, r in zip(env.weights, [eval_mean_gc, -eval_mean_mfe, eval_mean_cai]))
 
     if config.wandb_project:
 
@@ -413,9 +444,7 @@ def main(args, config):
                 "Inference_time": inference_time,
                 "Avg_time_per_sequence": avg_time_per_seq,
                 "Reward Metric distributions": wandb.Image("metric_distributions.png"),
-                "edit_distance_distribution": wandb.Image(
-                    "edit_distance_distribution.png"
-                ),
+                "edit_distance_distribution": wandb.Image("edit_distance_distribution.png"),
                 "CAI vs MFE": wandb.Image("cai_vs_mfe.png"),
                 "GC vs MFE": wandb.Image("gc_vs_mfe.png"),
                 "mean_edit_distance": np.mean(distances),
@@ -436,64 +465,31 @@ def main(args, config):
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
-
     parser.add_argument("--no_cuda", action="store_true", help="Prevent CUDA usage")
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
 
-    parser.add_argument(
-        "--lr",
-        type=float,
-        default=1e-2,
-        help="Learning rate for the estimators' modules",
-    )
-    parser.add_argument(
-        "--lr_logz",
-        type=float,
-        default=1e-1,
-        help="Learning rate for the logZ parameter",
-    )
+    # training-related
+    parser.add_argument('--lr', type=float, default=0.005)
+    parser.add_argument('--lr_logz', type=float, default=1e-1)
 
-    parser.add_argument(
-        "--n_iterations", type=int, default=100, help="Number of iterations"
-    )
-    parser.add_argument(
-        "--n_samples", type=int, default=100, help="Number of samples to generate"
-    )
-    parser.add_argument(
-        "--top_n", type=int, default=50, help="Top K sequences"
-    )
+    parser.add_argument('--n_iterations', type=int, default=300)
+    parser.add_argument('--n_samples', type=int, default=100)
+    parser.add_argument('--top_n', type=int, default=50)
+    parser.add_argument('--batch_size', type=int, default=8)
 
-    parser.add_argument("--batch_size", type=int, default=2, help="Batch size")
+    parser.add_argument('--epsilon', type=float, default=0.1)
+    parser.add_argument('--subTB_lambda', type=float, default=0.8)
 
-    parser.add_argument(
-        "--epsilon", type=float, default=0.1, help="Epsilon for the sampler"
-    )
+    parser.add_argument('--embedding_dim', type=int, default=32)
+    parser.add_argument('--hidden_dim', type=int, default=128)
+    parser.add_argument('--n_hidden', type=int, default=2)
 
-    parser.add_argument(
-        "--embedding_dim", type=int, default=32, help="Dimension of codon embeddings"
-    )
-    parser.add_argument(
-        "--hidden_dim", type=int, default=256, help="Hidden dimension of the networks"
-    )
-    parser.add_argument(
-        "--n_hidden", type=int, default=2, help="Number of hidden layers"
-    )
+    parser.add_argument('--tied', action='store_true')
+    parser.add_argument('--clip_grad_norm', type=float, default=1.0)
+    parser.add_argument('--lr_patience', type=int, default=10)
 
-    parser.add_argument(
-        "--tied", action="store_true", help="Whether to tie the parameters of PF and PB"
-    )
-    parser.add_argument(
-        "--clip_grad_norm", type=float, default=1.0, help="Gradient clipping norm"
-    )
-    parser.add_argument(
-        "--lr_patience",
-        type=int,
-        default=10,
-        help="Patience for learning rate scheduler",
-    )
-
-    parser.add_argument("--wandb_project", type=str, default="mRNA_design", help="Weights & Biases project name")
-    parser.add_argument("--run_name", type=str, default="", help="Name for the wandb run")
+    parser.add_argument('--wandb_project', type=str, default='mRNA_design')
+    parser.add_argument('--run_name', type=str, default='')
 
     parser.add_argument("--config_path", type=str, default="config.yaml")
 

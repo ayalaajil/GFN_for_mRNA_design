@@ -1,1 +1,0 @@
-Sequence 1: AUGGACUCAGAGAUG, Reward: 0.29, GC Content: 46.67, MFE: 0.00, CAI: 0.72
