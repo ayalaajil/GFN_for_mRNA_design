@@ -12,6 +12,7 @@ from datetime import datetime
 from transformers.optimization import get_linear_schedule_with_warmup
 
 from utils import *
+from simple_reward_function import compute_simple_reward
 from DeepArchi import *
 import logging
 import torch
@@ -20,6 +21,7 @@ import numpy as np
 import time
 import wandb
 from comparison import analyze_sequence_properties
+from enhanced_comparison import run_comprehensive_analysis
 from torchgfn.src.gfn.gflownet import TBGFlowNet, SubTBGFlowNet
 from torchgfn.src.gfn.modules import DiscretePolicyEstimator, Estimator, ScalarEstimator
 from torchgfn.src.gfn.utils.modules import MLP
@@ -229,7 +231,51 @@ def main(args, config):
 
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M")
 
-    model_filename = f"trained_gflownet_{args.run_name}_{timestamp}.pth"
+    # Create organized output directory structure
+    # Format: outputs/{experiment_type}/{protein_size}/{run_name}_{timestamp}/
+    experiment_type = "conditional" if hasattr(args, 'conditional') and args.conditional else "unconditional"
+    protein_size = getattr(config, 'type', 'unknown')
+    output_dir = f"outputs/{experiment_type}/{protein_size}/{args.run_name}_{timestamp}"
+
+    # Create directory if it doesn't exist
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Create experiment summary file
+    summary_file = f"{output_dir}/experiment_summary.txt"
+    with open(summary_file, "w") as f:
+        f.write(f"Experiment Summary\n")
+        f.write(f"==================\n\n")
+        f.write(f"Timestamp: {timestamp}\n")
+        f.write(f"Experiment Type: {experiment_type}\n")
+        f.write(f"Protein Size: {protein_size}\n")
+        f.write(f"Run Name: {args.run_name}\n")
+        f.write(f"Architecture: {getattr(config, 'arch', 'MLP')}\n")
+        f.write(f"Protein Sequence Length: {len(config.protein_seq)}\n")
+        f.write(f"Training Iterations: {args.n_iterations}\n")
+        f.write(f"Batch Size: {args.batch_size}\n")
+        f.write(f"Learning Rate: {args.lr}\n")
+        f.write(f"Hidden Dimension: {args.hidden_dim}\n")
+        f.write(f"Number of Hidden Layers: {args.n_hidden}\n")
+        f.write(f"SubTB Lambda: {args.subTB_lambda}\n")
+        f.write(f"Epsilon: {args.epsilon}\n")
+        f.write(f"WandB Project: {config.wandb_project}\n")
+        f.write(f"Device: {device}\n")
+        f.write(f"\nProtein Sequence: {config.protein_seq}\n")
+        f.write(f"Natural mRNA Sequence: {config.natural_mRNA_seq}\n")
+        f.write(f"\nGenerated Files:\n")
+        f.write(f"- experiment_summary.txt (this file)\n")
+        f.write(f"- trained_gflownet_{args.run_name}_{timestamp}.pth (model weights)\n")
+        f.write(f"- generated_sequences_{timestamp}.txt (generated sequences)\n")
+        f.write(f"- metric_distributions_{timestamp}.png (metric histograms)\n")
+        f.write(f"- pareto_scatter_{timestamp}.png (Pareto front)\n")
+        f.write(f"- cai_vs_mfe_{timestamp}.png (CAI vs MFE plot)\n")
+        f.write(f"- gc_vs_mfe_{timestamp}.png (GC vs MFE plot)\n")
+        f.write(f"- comprehensive_comparison_{timestamp}.txt (comparison table)\n")
+        f.write(f"- metrics_summary_{timestamp}.txt (detailed metrics)\n")
+        f.write(f"- enhanced_diversity_analysis_{timestamp}.png (diversity plots)\n")
+
+    model_filename = f"{output_dir}/trained_gflownet_{args.run_name}_{timestamp}.pth"
+
     torch.save(
         {
             "model_state": gflownet.state_dict(),
@@ -240,12 +286,12 @@ def main(args, config):
 
     logging.info("Plotting final metric histograms and Pareto front...")
 
-    plot_metric_histograms(gc_list, mfe_list, cai_list, out_path=f"outputs_{config.type}/metric_distributions_{timestamp}.png")
-    plot_pareto_front(gc_list, mfe_list, cai_list, out_path=f"outputs_{config.type}/pareto_scatter_{timestamp}.png")
-    plot_cai_vs_mfe(cai_list, mfe_list, out_path = f"outputs_{config.type}/cai_vs_mfe_{timestamp}.png")
-    plot_gc_vs_mfe(gc_list, mfe_list, out_path= f"outputs_{config.type}/gc_vs_mfe_{timestamp}.png")
+    plot_metric_histograms(gc_list, mfe_list, cai_list, out_path=f"{output_dir}/metric_distributions_{timestamp}.png")
+    plot_pareto_front(gc_list, mfe_list, cai_list, out_path=f"{output_dir}/pareto_scatter_{timestamp}.png")
+    plot_cai_vs_mfe(cai_list, mfe_list, out_path = f"{output_dir}/cai_vs_mfe_{timestamp}.png")
+    plot_gc_vs_mfe(gc_list, mfe_list, out_path= f"{output_dir}/gc_vs_mfe_{timestamp}.png")
 
-    filename = f"outputs_{config.type}/generated_sequences_{timestamp}.txt"
+    filename = f"{output_dir}/generated_sequences_{timestamp}.txt"
 
     logging.info(f"Saving generated sequences to {filename}")
     sorted_samples = sorted(samples.items(), key=lambda x: x[1][0], reverse=True)
@@ -331,38 +377,67 @@ def main(args, config):
 
     analyze_sequence_properties(generated_sequences_tensor, natural_tensor, labels=sequence_labels)
 
-    Eval_avg_reward = sum(
-        w * r
-        for w, r in zip(env.weights, [eval_mean_gc, -eval_mean_mfe, eval_mean_cai])
+    # Run comprehensive analysis with enhanced metrics
+    logging.info("Running comprehensive analysis with diversity and quality metrics...")
+    analysis_results = run_comprehensive_analysis(
+        samples, gc_list, mfe_list, cai_list, config.natural_mRNA_seq,
+        output_dir, timestamp, top_n=args.top_n
     )
+
+    # Compute the reward for each sample and then average them
+    Eval_avg_reward = 0.0
+    if len(samples) > 0:
+        total_reward = 0.0
+        for seq in samples.keys():
+
+            seq_indices = torch.tensor([env.codon_to_idx[codon] for codon in seq], device=env.device)
+            reward, _ = compute_simple_reward(
+                seq_indices,
+                env.codon_gc_counts,
+                env.weights,
+                protein_seq=env.protein_seq
+            )
+            total_reward += reward
+        Eval_avg_reward = total_reward / len(samples)
 
     if args.wandb_project:
 
         logging.info("Logging evaluation metrics to WandB...")
         wandb.log(
             {
-                "Pareto Plot": wandb.Image(f"outputs_{config.type}/pareto_scatter_{timestamp}.png"),
+                "Pareto Plot": wandb.Image(f"{output_dir}/pareto_scatter_{timestamp}.png"),
                 "Training_time": total_time,
                 "Inference_time": inference_time,
                 "Avg_time_per_sequence": avg_time_per_seq,
-                "Reward Metric distributions": wandb.Image(f"outputs_{config.type}/metric_distributions_{timestamp}.png"),
+                "Reward Metric distributions": wandb.Image(f"{output_dir}/metric_distributions_{timestamp}.png"),
                 "edit_distance_distribution": wandb.Image(
-                    "edit_distance_distribution.png"
+                    f"{output_dir}/edit_distance_distribution_{timestamp}.png"
                 ),
-                "CAI vs MFE": wandb.Image( f"outputs_{config.type}/cai_vs_mfe_{timestamp}.png"),
-                "GC vs MFE": wandb.Image(f"outputs_{config.type}/gc_vs_mfe_{timestamp}.png"),
+                "CAI vs MFE": wandb.Image( f"{output_dir}/cai_vs_mfe_{timestamp}.png"),
+                "GC vs MFE": wandb.Image(f"{output_dir}/gc_vs_mfe_{timestamp}.png"),
                 "mean_edit_distance": np.mean(distances),
                 "std_edit_distance": np.std(distances),
                 "Eval_mean_gc": eval_mean_gc,
                 "Eval_mean_mfe": eval_mean_mfe,
                 "Eval_mean_cai": eval_mean_cai,
                 "Eval_avg_reward": Eval_avg_reward,
+                
+                # Enhanced diversity and quality metrics
+                "diversity_mean_edit_distance": analysis_results['diversity_metrics']['mean_edit_distance'],
+                "diversity_std_edit_distance": analysis_results['diversity_metrics']['std_edit_distance'],
+                "diversity_unique_sequences": analysis_results['diversity_metrics']['unique_sequences'],
+                "diversity_uniqueness_ratio": analysis_results['diversity_metrics']['uniqueness_ratio'],
+                "quality_pareto_efficiency": analysis_results['quality_metrics']['pareto_efficiency'],
+                "quality_reward_mean": analysis_results['quality_metrics']['reward_stats']['mean'],
+                "quality_reward_std": analysis_results['quality_metrics']['reward_stats']['std'],
+                "Comprehensive Comparison Table": wandb.Image(analysis_results['table_path']),
+                "Metrics Summary": wandb.Image(analysis_results['summary_path']),
+                "Enhanced Diversity Analysis": wandb.Image(analysis_results['plot_path']),
             }
         )
 
     wandb.summary["final_loss"] = loss_history[-1]
     wandb.summary["unique_sequences"] = len(unique_seqs)
-
     wandb.finish()
 
     return Eval_avg_reward
@@ -371,39 +446,91 @@ def main(args, config):
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
-
     parser.add_argument("--no_cuda", action="store_true", help="Prevent CUDA usage")
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
 
-    parser.add_argument("--subTB_weighting",type=str,default="geometric_within",help="weighting scheme for SubTB")
-    parser.add_argument("--subTB_lambda", type=float, default=0.8, help="Lambda parameter for SubTB")
+    # training-related
+    parser.add_argument('--lr', type=float, default=0.005)
+    parser.add_argument('--lr_logz', type=float, default=1e-1)
 
-    parser.add_argument("--lr", type=float,default=0.005, help="Learning rate for the estimators' modules",)
-    parser.add_argument("--lr_logz",type=float,default=1e-1,help="Learning rate for the logZ parameter",)
+    parser.add_argument('--n_iterations', type=int, default=300)
+    parser.add_argument('--n_samples', type=int, default=100)
+    parser.add_argument('--top_n', type=int, default=50)
+    parser.add_argument('--batch_size', type=int, default=8)
 
-    parser.add_argument("--n_iterations", type=int, default=500, help="Number of iterations")
-    parser.add_argument("--n_samples", type=int, default=100, help="Number of samples to generate")
+    parser.add_argument('--epsilon', type=float, default=0.25)
+    parser.add_argument('--subTB_lambda', type=float, default=0.9)
+    parser.add_argument("--subTB_weighting", type=str, default="geometric_within", help="weighting scheme for SubTB")
 
-    parser.add_argument("--batch_size", type=int, default=16, help="Batch size")
-    parser.add_argument("--epsilon", type=float, default=0.25, help="Epsilon for the sampler")
-    
-    parser.add_argument("--embedding_dim", type=int, default=64, help="Dimension of codon embeddings")
-    parser.add_argument("--hidden_dim", type=int, default=64, help="Hidden dimension of the networks")
-    parser.add_argument("--n_hidden", type=int, default=3, help="Number of hidden layers")
+    parser.add_argument('--embedding_dim', type=int, default=32)
+    parser.add_argument('--hidden_dim', type=int, default=128)
+    parser.add_argument('--n_hidden', type=int, default=2)
 
-    parser.add_argument("--tied", action="store_true", help="Whether to tie the parameters of PF and PB")
-    parser.add_argument("--clip_grad_norm", type=float, default=1.0, help="Gradient clipping norm")
-    parser.add_argument("--lr_patience", type=int, default=10, help="Patience for learning rate scheduler",)
+    parser.add_argument('--tied', action='store_true')
+    parser.add_argument('--clip_grad_norm', type=float, default=1.0)
+    parser.add_argument('--lr_patience', type=int, default=10)
 
-    parser.add_argument("--wandb_project", type=str, default="mRNA_design", help="Weights & Biases project name")
-    parser.add_argument("--run_name", type=str, default="", help="Name for the wandb run")
-
+    parser.add_argument('--wandb_project', type=str, default='mRNA_design')
+    parser.add_argument('--run_name', type=str, default='')
+    parser.add_argument('--conditional', action='store_true', help='Run conditional GFlowNet experiment')
     parser.add_argument("--config_path", type=str, default="config.yaml")
 
     args = parser.parse_args()
+    set_seed(args.seed)
     config = load_config(args.config_path)
 
     main(args, config)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# if __name__ == "__main__":
+
+#     parser = argparse.ArgumentParser()
+
+#     parser.add_argument("--no_cuda", action="store_true", help="Prevent CUDA usage")
+#     parser.add_argument("--seed", type=int, default=42, help="Random seed")
+
+#     parser.add_argument("--subTB_weighting",type=str,default="geometric_within",help="weighting scheme for SubTB")
+#     parser.add_argument("--subTB_lambda", type=float, default=0.8, help="Lambda parameter for SubTB")
+
+#     parser.add_argument("--lr", type=float,default=0.005, help="Learning rate for the estimators' modules",)
+#     parser.add_argument("--lr_logz",type=float,default=1e-1,help="Learning rate for the logZ parameter",)
+
+#     parser.add_argument("--n_iterations", type=int, default=500, help="Number of iterations")
+#     parser.add_argument("--n_samples", type=int, default=100, help="Number of samples to generate")
+
+#     parser.add_argument("--batch_size", type=int, default=16, help="Batch size")
+#     parser.add_argument("--epsilon", type=float, default=0.25, help="Epsilon for the sampler")
+
+#     parser.add_argument("--embedding_dim", type=int, default=64, help="Dimension of codon embeddings")
+#     parser.add_argument("--hidden_dim", type=int, default=64, help="Hidden dimension of the networks")
+#     parser.add_argument("--n_hidden", type=int, default=3, help="Number of hidden layers")
+
+#     parser.add_argument("--tied", action="store_true", help="Whether to tie the parameters of PF and PB")
+#     parser.add_argument("--clip_grad_norm", type=float, default=1.0, help="Gradient clipping norm")
+#     parser.add_argument("--lr_patience", type=int, default=10, help="Patience for learning rate scheduler",)
+
+#     parser.add_argument("--wandb_project", type=str, default="mRNA_design", help="Weights & Biases project name")
+#     parser.add_argument("--run_name", type=str, default="", help="Name for the wandb run")
+
+#     parser.add_argument("--config_path", type=str, default="config.yaml")
+
+#     args = parser.parse_args()
+#     config = load_config(args.config_path)
+
+#     main(args, config)
 
 
 
@@ -497,25 +624,3 @@ if __name__ == "__main__":
 
 
 
-
-
-
-
-
-
-
-
-
-############################### Comparison between configs ##############################
-
-# weight_configs = {
-# "GC_only": [1.0, 0.0, 0.0],
-# "MFE_only": [0.0, 1.0, 0.0],
-# "CAI_only": [0.0, 0.0, 1.0],
-# "MFE+CAI": [0.0, 0.5, 0.5],
-# "MFE+CAI+GC":[0.3, 0.3, 0.4]
-# }
-# all_results = sweep_weight_configs(env, sampler, weight_configs, n_samples=50)
-# plot_sweep_results(csv_path="sweep_results.csv")
-
-#############################################################################################

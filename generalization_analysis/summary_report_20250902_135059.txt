@@ -1,0 +1,44 @@
+GENERALIZATION ANALYSIS SUMMARY REPORT
+==================================================
+
+EXPERIMENT SETUP
+--------------------
+Training weight configurations: 4
+Test weight configurations: 8
+Extreme test configurations: 6
+Device: cuda
+
+PERFORMANCE COMPARISON
+-------------------------
+Average Test Reward:
+  Unconditional: 0.2488 ± 0.1117
+  Conditional:   0.2454 ± 0.1089
+  Improvement:   -1.37%
+  P-value:       0.9547
+  Significant:   No
+
+Pareto Efficiency:
+  Unconditional: 0.2375
+  Conditional:   0.2575
+  P-value:       0.5583
+
+Sequence Diversity:
+  Unconditional: 50.4829
+  Conditional:   50.7774
+  P-value:       0.0092
+
+Extreme Case Performance:
+  Unconditional: 0.2233
+  Conditional:   0.2211
+  Improvement:   -0.99%
+
+Consistency (Lower is better):
+  Unconditional: 0.0157
+  Conditional:   0.0158
+  Improvement:   -0.70%
+
+CONCLUSION
+----------
+Conditional model performs better on 2/5 metrics.
+CONCLUSION: Conditional training shows some benefits for generalization.
+The improvement in reward is not statistically significant.

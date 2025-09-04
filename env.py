@@ -5,6 +5,7 @@ from gfn.actions import Actions
 from gfn.states import DiscreteStates
 from gfn.env import DiscreteEnv
 from typing import Union, List
+from simple_reward_function import compute_simple_reward
 
 def _clip(v: float, lo: float, hi: float) -> float:
     return lo if v < lo else (hi if v > hi else v)
@@ -185,17 +186,26 @@ class CodonDesignEnv(DiscreteEnv):
             seq_indices = states_tensor[i]
 
             # compute_reward returns (reward_float, (gc, mfe, cai))
-            r, _ = compute_reward(
+            # r, _ = compute_reward(
+            #     seq_indices,
+            #     self.codon_gc_counts,
+            #     weights=weights_seq,
+            #     gc_target=gc_target,
+            #     gc_width=gc_width,
+            #     mfe_min=mfe_min,
+            #     mfe_max=mfe_max,
+            #     cai_min=cai_min,
+            #     cai_max=cai_max,
+            # )
+
+            r, _ = compute_simple_reward(
                 seq_indices,
                 self.codon_gc_counts,
                 weights=weights_seq,
-                gc_target=gc_target,
-                gc_width=gc_width,
-                mfe_min=mfe_min,
-                mfe_max=mfe_max,
-                cai_min=cai_min,
-                cai_max=cai_max,
+                protein_seq=self.protein_seq,
+                reward_scale=5.0
             )
+
             rewards.append(float(r))
 
         if len(rewards) == 0:

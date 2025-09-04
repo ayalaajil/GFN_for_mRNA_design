@@ -10,6 +10,7 @@ sys.path.insert(0,os.path.join(os.path.dirname(__file__), 'torchgfn', 'src'))
 
 import torch
 import numpy as np
+import random
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -30,15 +31,12 @@ from evaluate import evaluate, evaluate_conditional
 from utils import *
 from plots import *
 from comparison import analyze_sequence_properties
-from torchgfn.src.gfn.gflownet import TBGFlowNet
+from torchgfn.src.gfn.gflownet import TBGFlowNet, SubTBGFlowNet
 from torchgfn.src.gfn.modules import DiscretePolicyEstimator, ScalarEstimator
 from torchgfn.src.gfn.utils.modules import MLP
 from torchgfn.src.gfn.samplers import Sampler
 
-# Import conditional modules
-from gfn.gflownet import TBGFlowNet as ConditionalTBGFlowNet
 from gfn.estimators import ConditionalDiscretePolicyEstimator, ConditionalScalarEstimator
-from gfn.utils.modules import MLP as ConditionalMLP
 
 logging.basicConfig(
     level=logging.INFO,
@@ -50,6 +48,7 @@ class GeneralizationEvaluator:
     """Evaluates generalization performance of conditional vs unconditional models."""
 
     def __init__(self, config_path: str, device: str = "cuda"):
+
         self.config = load_config(config_path)
         self.device = torch.device(device) if torch.cuda.is_available() else torch.device("cpu")
         self.results = {}
@@ -86,159 +85,265 @@ class GeneralizationEvaluator:
 
     def setup_environment(self):
         """Setup the environment and preprocessor."""
+
         logging.info("Setting up environment...")
+
         self.env = CodonDesignEnv(protein_seq=self.config.protein_seq, device=self.device)
         self.preprocessor = CodonSequencePreprocessor(
             self.env.seq_length, embedding_dim=32, device=self.device
         )
         logging.info(f"Environment setup complete. Sequence length: {len(self.config.protein_seq)}")
 
-    def build_unconditional_model(self, hidden_dim: int = 256, n_hidden: int = 2):
+    def build_unconditional_model(self, args):
         """Build unconditional GFlowNet model."""
+
         logging.info("Building unconditional model...")
 
-        # Policy estimators
         module_PF = MLP(
-            input_dim=self.preprocessor.output_dim,
-            output_dim=self.env.n_actions,
-            hidden_dim=hidden_dim,
-            n_hidden_layers=n_hidden,
+        input_dim=self.preprocessor.output_dim,
+        output_dim=self.env.n_actions,
+        hidden_dim=args.hidden_dim,
+        n_hidden_layers=args.n_hidden,
         )
 
         module_PB = MLP(
             input_dim=self.preprocessor.output_dim,
             output_dim=self.env.n_actions - 1,
-            hidden_dim=hidden_dim,
-            n_hidden_layers=n_hidden,
+            hidden_dim=args.hidden_dim,
+            n_hidden_layers=args.n_hidden,
+            trunk=module_PF.trunk if args.tied else None,
         )
 
         pf_estimator = DiscretePolicyEstimator(
-            module=module_PF, preprocessor=self.preprocessor
-        )
-        pb_estimator = DiscretePolicyEstimator(
-            module=module_PB, preprocessor=self.preprocessor
+            module_PF, self.env.n_actions, preprocessor=self.preprocessor, is_backward=False
         )
 
-        # LogZ estimator
-        module_logZ = MLP(
+        pb_estimator = DiscretePolicyEstimator(
+            module_PB, self.env.n_actions, preprocessor=self.preprocessor, is_backward=True
+        )
+
+        module_logF = MLP(
             input_dim=self.preprocessor.output_dim,
             output_dim=1,
-            hidden_dim=hidden_dim,
-            n_hidden_layers=n_hidden,
+            hidden_dim=args.hidden_dim,
+            n_hidden_layers=args.n_hidden,
+            trunk=module_PF.trunk if args.tied else None,
         )
-        logZ_estimator = ScalarEstimator(module=module_logZ, preprocessor=self.preprocessor)
 
-        # GFlowNet
-        gflownet = TBGFlowNet(
+        logF_estimator = ScalarEstimator(module=module_logF, preprocessor=self.preprocessor)
+
+        gflownet = SubTBGFlowNet(
             pf=pf_estimator,
             pb=pb_estimator,
-            logZ=logZ_estimator,
+            logF=logF_estimator,
+            weighting=args.subTB_weighting,
+            lamda=args.subTB_lambda,
         )
-
         return gflownet
 
-    def build_conditional_model(self, hidden_dim: int = 256, n_hidden: int = 2):
+
+    def build_conditional_model(self, args):
         """Build conditional GFlowNet model."""
+
         logging.info("Building conditional model...")
 
-        # Policy estimators with conditioning
-        module_PF = ConditionalMLP(
+        CONCAT_SIZE = 16
+        module_PF = MLP(
             input_dim=self.preprocessor.output_dim,
+            output_dim=CONCAT_SIZE,
+            hidden_dim=args.hidden_dim,
+            n_hidden_layers=args.n_hidden,
+        )
+        module_PB = MLP(
+            input_dim=self.preprocessor.output_dim,
+            output_dim=CONCAT_SIZE,
+            hidden_dim=args.hidden_dim,
+            n_hidden_layers=args.n_hidden,
+            trunk=module_PF.trunk if args.tied else None,
+        )
+        module_cond = MLP(
+            input_dim=3,
+            output_dim=CONCAT_SIZE,
+            hidden_dim=args.hidden_dim,
+        )
+        module_final_PF = MLP(
+            input_dim=CONCAT_SIZE * 2,
             output_dim=self.env.n_actions,
-            hidden_dim=hidden_dim,
-            n_hidden_layers=n_hidden,
-            cond_dim=3,  # 3 weights for GC, MFE, CAI
         )
-
-        module_PB = ConditionalMLP(
-            input_dim=self.preprocessor.output_dim,
+        module_final_PB = MLP(
+            input_dim=CONCAT_SIZE * 2,
             output_dim=self.env.n_actions - 1,
-            hidden_dim=hidden_dim,
-            n_hidden_layers=n_hidden,
-            cond_dim=3,
+            trunk=module_final_PF.trunk,
         )
-
         pf_estimator = ConditionalDiscretePolicyEstimator(
-            module=module_PF, preprocessor=self.preprocessor
+            module_PF,
+            module_cond,
+            module_final_PF,
+            self.env.n_actions,
+            preprocessor=self.preprocessor,
+            is_backward=False,
         )
         pb_estimator = ConditionalDiscretePolicyEstimator(
-            module=module_PB, preprocessor=self.preprocessor
+            module_PB,
+            module_cond,
+            module_final_PB,
+            self.env.n_actions,
+            preprocessor=self.preprocessor,
+            is_backward=True,
         )
-
-        # LogZ estimator with conditioning
-        module_logZ = ConditionalMLP(
+        module_state_logF = MLP(
             input_dim=self.preprocessor.output_dim,
+            output_dim=CONCAT_SIZE,
+            hidden_dim=args.hidden_dim,
+            n_hidden_layers=1,
+        )
+        module_conditioning_logF = MLP(
+            input_dim=3,
+            output_dim=CONCAT_SIZE,
+            hidden_dim=args.hidden_dim,
+            n_hidden_layers=1,
+        )
+        module_final_logF = MLP(
+            input_dim=CONCAT_SIZE * 2,
             output_dim=1,
-            hidden_dim=hidden_dim,
-            n_hidden_layers=n_hidden,
-            cond_dim=3,
+            hidden_dim=args.hidden_dim,
+            n_hidden_layers=1,
         )
-        logZ_estimator = ConditionalScalarEstimator(
-            module=module_logZ, preprocessor=self.preprocessor
+        logF_estimator = ConditionalScalarEstimator(
+            module_state_logF,
+            module_conditioning_logF,
+            module_final_logF,
+            preprocessor=self.preprocessor,
         )
-
-        # Conditional GFlowNet
-        gflownet = ConditionalTBGFlowNet(
+        gflownet = SubTBGFlowNet(
+            logF=logF_estimator,
             pf=pf_estimator,
             pb=pb_estimator,
-            logZ=logZ_estimator,
+            lamda=args.subTB_lambda,
         )
-
         return gflownet
 
-    def train_model(self, gflownet, weights_list: List[List[float]],
-                   n_iterations: int = 100, batch_size: int = 2,
-                   lr: float = 1e-2, is_conditional: bool = False):
+
+    def train_model(self, args, gflownet, weights_list: List[List[float]], is_conditional: bool = False):
         """Train a model on multiple weight configurations."""
+
         logging.info(f"Training {'conditional' if is_conditional else 'unconditional'} model...")
 
-        optimizer = torch.optim.Adam(gflownet.parameters(), lr=lr)
         sampler = Sampler(estimator=gflownet.pf)
+        gflownet = gflownet.to(self.env.device)
+
+        non_logz_params = [
+            v for k, v in dict(gflownet.named_parameters()).items() if k != "logZ"
+        ]
+        if "logZ" in dict(gflownet.named_parameters()):
+            logz_params = [dict(gflownet.named_parameters())["logZ"]]
+        else:
+            logz_params = []
+
+        params = [
+            {"params": non_logz_params, "lr": args.lr},
+            {"params": logz_params, "lr": args.lr_logz},
+        ]
+        optimizer = torch.optim.Adam(params)
+
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="min", factor=0.5, patience=args.lr_patience)
 
         loss_history = []
         reward_history = []
+        reward_components_history = []
+        unique_sequences = set()
 
-        for iteration in range(n_iterations):
-            # Sample a random weight configuration for this iteration
-            weights = random.choice(weights_list)
-            self.env.set_weights(weights)
+        weights = np.array(random.choice(weights_list))  # fix the weights for the unconditional training
+
+        for it in (pbar := tqdm(range(args.n_iterations), dynamic_ncols=True)):
+
+            iter_start_time = time.time()
 
             if is_conditional:
-                # For conditional training, we need to provide conditioning
-                conditioning = torch.tensor(weights, dtype=torch.float32, device=self.device)
-                conditioning = conditioning.unsqueeze(0).expand(batch_size, -1)
+
+                # Sample a random weight configuration per iteration
+                weights = np.random.dirichlet([1, 1, 1])
+                self.env.set_weights(weights.tolist())
+
+                conditioning = (torch.tensor(weights, dtype=torch.get_default_dtype(), device=self.env.device))
+                conditioning = conditioning.unsqueeze(0).expand(args.batch_size, *conditioning.shape)
+
+                trajectories = gflownet.sample_trajectories(
+                    self.env,
+                    n=args.batch_size,
+                    conditioning=conditioning,
+                    save_logprobs=True,
+                    save_estimator_outputs=True,
+                    epsilon=args.epsilon,
+                )
+
+            else:
+
+                self.env.set_weights(weights.tolist())
 
                 trajectories = sampler.sample_trajectories(
-                    self.env, n=batch_size, conditioning=conditioning
+                    self.env,
+                    n=args.batch_size,
+                    save_logprobs=True,
+                    epsilon=args.epsilon
                 )
-            else:
-                trajectories = sampler.sample_trajectories(self.env, n=batch_size)
 
-            # Compute loss
-            loss = gflownet.loss(trajectories)
+            optimizer.zero_grad()
+            loss = gflownet.loss_from_trajectories(
+                self.env, trajectories, recalculate_all_logprobs=False
+            )
 
-            # Backward pass
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
+            scheduler.step(loss)
 
-            # Compute average reward
-            rewards = []
-            for traj in trajectories:
-                if traj.is_complete:
-                    final_state = traj.states[-1]
-                    reward, _ = compute_reward(final_state, self.env.codon_gc_counts, weights)
-                    rewards.append(reward)
+            iter_time = time.time() - iter_start_time
 
-            avg_reward = np.mean(rewards) if rewards else 0.0
+            final_states = trajectories.terminating_states.tensor.to(self.device)
+            rewards, components = [], []
 
-            loss_history.append(loss.item())
+            for state in final_states:
+
+                state = state.to(self.device)
+                r, c = compute_reward(state, self.env.codon_gc_counts, self.env.weights)
+                rewards.append(r)
+                seq = "".join([self.env.idx_to_codon[i.item()] for i in state])
+                unique_sequences.add(seq)
+
+                rewards.append(r)
+                components.append(c)
+
+            avg_reward = float(np.mean(rewards)) if len(rewards) > 0 else 0.0
+
             reward_history.append(avg_reward)
+            reward_components_history.extend(components)
+            components_tensor = torch.tensor(components)
+            avg_gc, avg_mfe, avg_cai = components_tensor.mean(dim=0).tolist()
 
-            if iteration % 20 == 0:
-                logging.info(f"Iteration {iteration}: Loss = {loss.item():.4f}, Avg Reward = {avg_reward:.4f}")
 
-        return loss_history, reward_history
+            loss_history.append(float(loss.item()))
+
+            if (it % max(1, args.n_iterations // 10)) == 0:
+                logging.info(f"Iter {it}: loss={loss.item():.4f} avg_reward={avg_reward:.4f}")
+
+            wandb.log(
+            {
+                "iteration": it,
+                "loss": loss.item(),
+                "avg_reward": avg_reward,
+                "avg_gc": avg_gc,
+                "avg_mfe": avg_mfe,
+                "avg_cai": avg_cai,
+                "w_gc": self.env.weights[0],
+                "w_mfe": self.env.weights[1],
+                "w_cai": self.env.weights[2],
+                "iter_time": iter_time,
+            }
+             )
+
+        return loss_history, reward_history, unique_sequences
+
 
     def evaluate_model(self, gflownet, weights_list: List[List[float]],
                       n_samples: int = 50, is_conditional: bool = False) -> Dict:
@@ -258,6 +363,7 @@ class GeneralizationEvaluator:
         }
 
         for weights in weights_list:
+            
             self.env.set_weights(weights)
 
             if is_conditional:
@@ -334,7 +440,7 @@ class GeneralizationEvaluator:
 
         return total_distance / count if count > 0 else 0.0
 
-    def run_comparison(self, n_iterations: int = 100, n_samples: int = 50,
+    def run_comparison(self, args, n_iterations: int = 100, n_samples: int = 50,
                       hidden_dim: int = 256, n_hidden: int = 2):
         """Run the complete comparison between conditional and unconditional models."""
         logging.info("Starting comprehensive comparison...")
@@ -343,13 +449,12 @@ class GeneralizationEvaluator:
 
         # Train and evaluate unconditional model
         logging.info("=== UNCONDITIONAL MODEL ===")
-        unconditional_model = self.build_unconditional_model(hidden_dim, n_hidden)
+        unconditional_model = self.build_unconditional_model(args)
         unconditional_model.to(self.device)
 
         # Train on training weights
-        unconditional_loss, unconditional_reward = self.train_model(
-            unconditional_model, self.training_weights, n_iterations, is_conditional=False
-        )
+        unconditional_loss, unconditional_reward, unconditional_unique_sequences = self.train_model(args,
+            unconditional_model, self.training_weights)
 
         # Evaluate on test weights
         unconditional_test_results = self.evaluate_model(
@@ -363,12 +468,12 @@ class GeneralizationEvaluator:
 
         # Train and evaluate conditional model
         logging.info("=== CONDITIONAL MODEL ===")
-        conditional_model = self.build_conditional_model(hidden_dim, n_hidden)
+        conditional_model = self.build_conditional_model(args)
         conditional_model.to(self.device)
 
         # Train on training weights
-        conditional_loss, conditional_reward = self.train_model(
-            conditional_model, self.training_weights, n_iterations, is_conditional=True
+        conditional_loss, conditional_reward, conditional_unique_sequences = self.train_model(args,
+            conditional_model, self.training_weights, is_conditional=True
         )
 
         # Evaluate on test weights
@@ -381,7 +486,6 @@ class GeneralizationEvaluator:
             conditional_model, self.extreme_test_weights, n_samples, is_conditional=True
         )
 
-        # Store results
         self.results = {
             'unconditional': {
                 'training_loss': unconditional_loss,
@@ -480,7 +584,8 @@ class GeneralizationEvaluator:
         plt.subplot(1, 3, 3)
         unc_rewards = self.results['unconditional']['test_results']['mean_rewards']
         cond_rewards = self.results['conditional']['test_results']['mean_rewards']
-        plt.boxplot([unc_rewards, cond_rewards], labels=['Unconditional', 'Conditional'])
+        plt.boxplot([unc_rewards, cond_rewards], patch_artist=True)
+        plt.xticks([1, 2], ['Unconditional', 'Conditional'])
         plt.title('Test Reward Distribution')
         plt.ylabel('Mean Reward')
         plt.grid(True, alpha=0.3)
@@ -554,10 +659,8 @@ class GeneralizationEvaluator:
         """Save all results to files."""
         os.makedirs(save_dir, exist_ok=True)
 
-        # Save raw results
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-        # Convert numpy arrays to lists for JSON serialization
         results_for_save = {}
         for model_type, data in self.results.items():
             results_for_save[model_type] = {}
@@ -577,12 +680,10 @@ class GeneralizationEvaluator:
         with open(f"{save_dir}/raw_results_{timestamp}.json", 'w') as f:
             json.dump(results_for_save, f, indent=2)
 
-        # Save analysis
         analysis = self.analyze_generalization()
         with open(f"{save_dir}/analysis_{timestamp}.json", 'w') as f:
             json.dump(analysis, f, indent=2)
 
-        # Create summary report
         self.create_summary_report(save_dir, timestamp, analysis)
 
     def create_summary_report(self, save_dir: str, timestamp: str, analysis: Dict):
@@ -603,7 +704,6 @@ class GeneralizationEvaluator:
             f.write("PERFORMANCE COMPARISON\n")
             f.write("-" * 25 + "\n")
 
-            # Reward comparison
             reward_comp = analysis['reward_comparison']
             f.write(f"Average Test Reward:\n")
             f.write(f"  Unconditional: {reward_comp['unconditional_mean']:.4f} ± {reward_comp['unconditional_std']:.4f}\n")
@@ -670,20 +770,41 @@ class GeneralizationEvaluator:
 
 
 def main():
+
     parser = argparse.ArgumentParser(description="Compare conditional vs unconditional GFlowNet training")
+
+    parser.add_argument("--seed", type=int, default=42, help="Random seed")
     parser.add_argument("--config_path", type=str, default="config.yaml", help="Path to config file")
-    parser.add_argument("--n_iterations", type=int, default=100, help="Number of training iterations")
+
+    parser.add_argument('--lr', type=float, default=0.005)
+    parser.add_argument('--lr_logz', type=float, default=1e-1)
+    parser.add_argument('--clip_grad_norm', type=float, default=1.0)
+    parser.add_argument('--lr_patience', type=int, default=10)
+    parser.add_argument('--batch_size', type=int, default=8)
+
+    parser.add_argument('--epsilon', type=float, default=0.1)
+    parser.add_argument('--subTB_lambda', type=float, default=0.8)
+    parser.add_argument("--subTB_weighting",type=str,default="geometric_within",help="weighting scheme for SubTB")
+    parser.add_argument('--tied', action='store_true')
+
+    parser.add_argument('--embedding_dim', type=int, default=32)
+    parser.add_argument('--hidden_dim', type=int, default=128)
+    parser.add_argument('--n_hidden', type=int, default=2)
+
+    parser.add_argument("--n_iterations", type=int, default=500, help="Number of training iterations")
     parser.add_argument("--n_samples", type=int, default=50, help="Number of evaluation samples")
-    parser.add_argument("--hidden_dim", type=int, default=256, help="Hidden dimension")
-    parser.add_argument("--n_hidden", type=int, default=2, help="Number of hidden layers")
+
     parser.add_argument("--save_dir", type=str, default="generalization_analysis", help="Directory to save results")
-    parser.add_argument("--wandb_project", type=str, default=None, help="WandB project name")
-    parser.add_argument("--wandb_run_name", type=str, default=None, help="WandB run name")
+    parser.add_argument("--wandb_project", type=str, default="Comparison_Cond_UnCond_GFN")
+    parser.add_argument("--wandb_run_name", type=str, default='')
 
     args = parser.parse_args()
 
-    # Initialize WandB if specified
+    set_seed(args.seed)
+
     if args.wandb_project:
+
+        print('Wandb initialization...')
         wandb.init(
             project=args.wandb_project,
             name=args.wandb_run_name or f"generalization_comparison_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
@@ -692,7 +813,7 @@ def main():
 
     # Run comparison
     evaluator = GeneralizationEvaluator(args.config_path)
-    results = evaluator.run_comparison(
+    results = evaluator.run_comparison(args,
         n_iterations=args.n_iterations,
         n_samples=args.n_samples,
         hidden_dim=args.hidden_dim,

@@ -1,6 +1,7 @@
 import numpy as np
 from tqdm import tqdm
 from utils import compute_reward
+from simple_reward_function import compute_simple_reward
 import wandb
 import time
 from plots import *
@@ -24,8 +25,15 @@ def train_conditional_gfn(args, env, gflownet, sampler, optimizer, scheduler, de
         env.set_weights(weights)
 
         # 2) build conditioning tensor:
+        # Import the protein encoding function
+        # from main_conditional import encode_protein_sequence
+        # Encode protein sequence
+        # protein_features = encode_protein_sequence(protein_seq, device)
+        # conditioning = torch.cat([weights_tensor, protein_features])
 
-        conditioning = (torch.tensor(weights, dtype=torch.get_default_dtype(), device=device))
+        # Combine weights and protein features
+        weights_tensor = torch.tensor(weights, dtype=torch.get_default_dtype(), device=device)
+        conditioning = weights_tensor
         conditioning = conditioning.unsqueeze(0).expand(args.batch_size, *conditioning.shape)
 
         # 3) sample trajectories *with conditioning*
@@ -54,8 +62,8 @@ def train_conditional_gfn(args, env, gflownet, sampler, optimizer, scheduler, de
         for state in final_states:
 
             state = state.to(device)
-            r, c = compute_reward(
-                state, env.codon_gc_counts, env.weights
+            r, c = compute_simple_reward(
+                state, env.codon_gc_counts, env.weights, protein_seq=env.protein_seq
             )  # (gc, mfe, cai)
             rewards.append(r)
             components.append(c)
@@ -101,12 +109,20 @@ def train(args, env, gflownet, sampler, optimizer, scheduler, device):
 
         iter_start_time = time.time()
 
-        trajectories = sampler.sample_trajectories(
-            env, args.batch_size, save_logprobs=True, epsilon=args.epsilon
+        trajectories = gflownet.sample_trajectories(
+            env,
+            n=args.batch_size,
+            save_logprobs=True,
+            save_estimator_outputs=True,
+            epsilon=args.epsilon,
         )
 
         optimizer.zero_grad()
-        loss = gflownet.loss(env, trajectories, recalculate_all_logprobs=False)
+        loss = gflownet.loss_from_trajectories(
+            env, trajectories, recalculate_all_logprobs=False
+        )
+
+        # loss = gflownet.loss(env, trajectories, recalculate_all_logprobs=False)
 
         loss.backward()
         optimizer.step()
@@ -121,9 +137,8 @@ def train(args, env, gflownet, sampler, optimizer, scheduler, device):
         for state in final_states:
 
             state = state.to(device)
-
-            r, c = compute_reward(
-                state, env.codon_gc_counts, env.weights
+            r, c = compute_simple_reward(
+                state, env.codon_gc_counts, env.weights, protein_seq=env.protein_seq
             )  # (gc, mfe, cai)
             rewards.append(r)
             components.append(c)

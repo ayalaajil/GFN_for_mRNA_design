@@ -1,4 +1,5 @@
 from utils import compute_reward
+from simple_reward_function import compute_simple_reward
 import torch
 from env import CodonDesignEnv
 from preprocessor import CodonSequencePreprocessor
@@ -17,6 +18,22 @@ def evaluate_conditional(env, sampler, weights, n_samples=100):
 
     env.set_weights(weights)
 
+    if not isinstance(weights, torch.Tensor):
+        weights = torch.tensor(weights, dtype=torch.float32, device=env.device)
+
+    # # Build conditioning tensor with protein sequence if provided
+    # if protein_seq is not None:
+    #     # Import the protein encoding function
+    #     from main_conditional import encode_protein_sequence
+
+    #     # Encode protein sequence
+    #     protein_features = encode_protein_sequence(protein_seq, env.device)
+
+    #     # Combine weights and protein features
+    #     conditioning = torch.cat([weights.detach().clone(), protein_features])
+    #else:
+
+
     conditioning = weights.detach().clone()
     conditioning = conditioning.unsqueeze(0).expand(n_samples, *conditioning.shape).to(env.device)
 
@@ -31,7 +48,7 @@ def evaluate_conditional(env, sampler, weights, n_samples=100):
 
     for state in final_states:
 
-        reward, components = compute_reward(state, env.codon_gc_counts, weights)
+        reward, components = compute_simple_reward(state, env.codon_gc_counts, weights, protein_seq=env.protein_seq)
         seq = "".join([env.idx_to_codon[i.item()] for i in state])
         samples[seq] = [reward, components]
 
@@ -55,7 +72,7 @@ def evaluate(env, sampler, weights, n_samples=100):
 
     for state in final_states:
 
-        reward, components = compute_reward(state, env.codon_gc_counts, weights)
+        reward, components, _ = compute_simple_reward(state, env.codon_gc_counts, weights, protein_seq=env.protein_seq)
         seq = "".join([env.idx_to_codon[i.item()] for i in state])
         samples[seq] = [reward, components]
 

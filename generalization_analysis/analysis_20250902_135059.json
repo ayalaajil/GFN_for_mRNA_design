@@ -1,0 +1,32 @@
+{
+  "reward_comparison": {
+    "unconditional_mean": 0.24882638283269404,
+    "conditional_mean": 0.24541231084283355,
+    "unconditional_std": 0.11172937967120164,
+    "conditional_std": 0.10892648574317834,
+    "t_statistic": 0.0578876848938037,
+    "p_value": 0.9546562178309542
+  },
+  "pareto_comparison": {
+    "unconditional_mean": 0.2375,
+    "conditional_mean": 0.2575,
+    "t_statistic": -0.5996253511966896,
+    "p_value": 0.558336340335871
+  },
+  "diversity_comparison": {
+    "unconditional_mean": 50.48285714285714,
+    "conditional_mean": 50.77744897959184,
+    "t_statistic": -3.016846913124767,
+    "p_value": 0.009237770857377243
+  },
+  "extreme_case_analysis": {
+    "unconditional_mean_reward": 0.2232775519341628,
+    "conditional_mean_reward": 0.22106095629995193,
+    "improvement_ratio": 0.9900724653463395
+  },
+  "consistency_analysis": {
+    "unconditional_reward_std": 0.015735750345780133,
+    "conditional_reward_std": 0.015847285350923303,
+    "consistency_improvement": 0.9929618857316359
+  }
+}
