@@ -1,54 +1,37 @@
-from utils import compute_reward
-from simple_reward_function import compute_simple_reward
 import torch
-from env import CodonDesignEnv
-from preprocessor import CodonSequencePreprocessor
-from torchgfn.src.gfn.gflownet import TBGFlowNet
-from torchgfn.src.gfn.modules import DiscretePolicyEstimator
-from torchgfn.src.gfn.utils.modules import MLP
-from torchgfn.src.gfn.samplers import Sampler
-from utils import load_config
 import numpy as np
 import pandas as pd
-import seaborn as sns
-import matplotlib.pyplot as plt
+
+from reward import compute_simple_reward
+from utils import *
 
 
-def evaluate_conditional(env, sampler, weights, n_samples=100):
-
+def evaluate(env, sampler, weights, n_samples=100, conditional=False):
+    """Evaluation function that handles both conditional and unconditional evaluation."""
+    
     env.set_weights(weights)
 
     if not isinstance(weights, torch.Tensor):
         weights = torch.tensor(weights, dtype=torch.float32, device=env.device)
 
-    # # Build conditioning tensor with protein sequence if provided
-    # if protein_seq is not None:
-    #     # Import the protein encoding function
-    #     from main_conditional import encode_protein_sequence
+    # Sample trajectories
+    if conditional:
+        conditioning = weights.detach().clone()
+        conditioning = conditioning.unsqueeze(0).expand(n_samples, *conditioning.shape).to(env.device)
+        eval_trajectories = sampler.sample_trajectories(env, n=n_samples, conditioning=conditioning)
 
-    #     # Encode protein sequence
-    #     protein_features = encode_protein_sequence(protein_seq, env.device)
+    else:
+        eval_trajectories = sampler.sample_trajectories(env, n=n_samples)
 
-    #     # Combine weights and protein features
-    #     conditioning = torch.cat([weights.detach().clone(), protein_features])
-    #else:
-
-
-    conditioning = weights.detach().clone()
-    conditioning = conditioning.unsqueeze(0).expand(n_samples, *conditioning.shape).to(env.device)
-
-    eval_trajectories = sampler.sample_trajectories(env, n=n_samples, conditioning=conditioning)
-
+    # Process results
     final_states = eval_trajectories.terminating_states.tensor
     samples = {}
-
-    gc_list = []
-    mfe_list = []
-    cai_list = []
+    gc_list, mfe_list, cai_list = [], [], []
 
     for state in final_states:
-
-        reward, components = compute_simple_reward(state, env.codon_gc_counts, weights, protein_seq=env.protein_seq)
+        reward, components = compute_simple_reward(
+            state, env.codon_gc_counts, weights
+        )
         seq = "".join([env.idx_to_codon[i.item()] for i in state])
         samples[seq] = [reward, components]
 
@@ -58,21 +41,44 @@ def evaluate_conditional(env, sampler, weights, n_samples=100):
 
     return samples, gc_list, mfe_list, cai_list
 
-def evaluate(env, sampler, weights, n_samples=100):
 
+def evaluate_conditional(env, sampler, weights, n_samples=100, protein_seq=None):
+    """
+    Evaluation function for conditional GFlowNet with protein sequence conditioning.
+
+    Args:
+        env: Environment
+        sampler: Sampler
+        weights: Weight configuration
+        n_samples: Number of samples to generate
+        protein_seq: Protein sequence for conditioning (if None, uses env.protein_seq)
+    """
     env.set_weights(weights)
 
-    eval_trajectories = sampler.sample_trajectories(env, n=n_samples)
+    if not isinstance(weights, torch.Tensor):
+        weights = torch.tensor(weights, dtype=torch.float32, device=env.device)
+
+    # Use provided protein sequence or environment's protein sequence
+    if protein_seq is None:
+        protein_seq = env.protein_seq
+
+    # Create conditioning tensor with weights + protein sequence
+    protein_features = encode_protein_sequence(protein_seq, env.device)
+    conditioning_vector = torch.cat([weights, protein_features])
+    conditioning = conditioning_vector.unsqueeze(0).expand(n_samples, *conditioning_vector.shape).to(env.device)
+
+    # Sample trajectories with conditioning
+    eval_trajectories = sampler.sample_trajectories(env, n=n_samples, conditioning=conditioning)
+
+    # Process results
     final_states = eval_trajectories.terminating_states.tensor
     samples = {}
-
-    gc_list = []
-    mfe_list = []
-    cai_list = []
+    gc_list, mfe_list, cai_list = [], [], []
 
     for state in final_states:
-
-        reward, components, _ = compute_simple_reward(state, env.codon_gc_counts, weights, protein_seq=env.protein_seq)
+        reward, components = compute_simple_reward(
+            state, env.codon_gc_counts, weights
+        )
         seq = "".join([env.idx_to_codon[i.item()] for i in state])
         samples[seq] = [reward, components]
 
@@ -148,6 +154,5 @@ def sweep_weight_configs(
 
     df = pd.DataFrame(rows)
     df.to_csv(save_path, index=False)
-    print(f"\nSaved results table to: {save_path}")
 
     return all_results

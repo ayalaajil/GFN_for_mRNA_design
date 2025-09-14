@@ -1,0 +1,33 @@
+Experiment Summary
+==================
+
+Timestamp: 2025-09-07_13-28
+Experiment Type: unconditional
+Protein Size: small
+Run Name: 
+Architecture: Transformer
+Protein Sequence Length: 75
+Training Iterations: 300
+Batch Size: 16
+Learning Rate: 0.005
+Hidden Dimension: 128
+Number of Hidden Layers: 3
+SubTB Lambda: 0.9
+Epsilon: 0.25
+WandB Project: GFN_Organized_Experiments
+Device: cuda
+
+Protein Sequence: MDSEVQRDGRILDLIDDAWREDKLPYEDVAIPLNELPEPEQDNGGTTESVKEQEMKWTDLALQYLHENVPPIGN*
+Natural mRNA Sequence: AUGGACAGUGAGGUUCAGAGAGAUGGAAGGAUCUUGGAUUUGAUUGAUGAUGCUUGGCGAGAAGACAAGCUGCCUUAUGAGGAUGUCGCAAUACCACUGAAUGAGCUUCCUGAACCUGAACAAGACAAUGGUGGCACCACAGAAUCUGUCAAAGAACAAGAAAUGAAGUGGACAGACUUAGCCUUACAGUACCUCCAUGAGAAUGUUCCCCCCAUUGGAAACUGA
+
+Generated Files:
+- experiment_summary.txt (this file)
+- trained_gflownet__2025-09-07_13-28.pth (model weights)
+- generated_sequences_2025-09-07_13-28.txt (generated sequences)
+- metric_distributions_2025-09-07_13-28.png (metric histograms)
+- pareto_scatter_2025-09-07_13-28.png (Pareto front)
+- cai_vs_mfe_2025-09-07_13-28.png (CAI vs MFE plot)
+- gc_vs_mfe_2025-09-07_13-28.png (GC vs MFE plot)
+- comprehensive_comparison_2025-09-07_13-28.txt (comparison table)
+- metrics_summary_2025-09-07_13-28.txt (detailed metrics)
+- enhanced_diversity_analysis_2025-09-07_13-28.png (diversity plots)

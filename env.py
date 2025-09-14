@@ -1,15 +1,10 @@
 import torch
-import math
 from utils import *
 from gfn.actions import Actions
 from gfn.states import DiscreteStates
 from gfn.env import DiscreteEnv
-from typing import Union, List
-from simple_reward_function import compute_simple_reward
-
-def _clip(v: float, lo: float, hi: float) -> float:
-    return lo if v < lo else (hi if v > hi else v)
-
+from typing import Union
+from reward import compute_simple_reward
 
 # --- mRNA Design Environment ---
 class CodonDesignEnv(DiscreteEnv):
@@ -27,15 +22,17 @@ class CodonDesignEnv(DiscreteEnv):
         protein_seq: str,
         device: torch.device,
         sf=None,
+        max_seq_length: int = None
     ):
 
         self._device = device
+
         self.protein_seq = protein_seq
         self.seq_length = len(protein_seq)
 
         # Total possible actions = N_CODONS + 1 (for exit action)
         self.n_actions = N_CODONS + 1
-        self.exit_action_index = N_CODONS  # Index for the exit action
+        self.exit_action_index = N_CODONS
 
         self.syn_indices = [get_synonymous_indices(aa) for aa in protein_seq]
 
@@ -46,12 +43,10 @@ class CodonDesignEnv(DiscreteEnv):
             dtype=torch.float,
         )
 
-        s0 = torch.full(
-            (self.seq_length,), fill_value=-1, dtype=torch.long, device=self._device
-        )
-        sf = torch.full(
-            (self.seq_length,), fill_value=0, dtype=torch.long, device=self._device
-        )
+
+        # Use fixed-size state tensors of length max_seq_length
+        s0 = torch.full((self.seq_length,), fill_value=-1, dtype=torch.long, device=self._device)
+        sf = torch.full((self.seq_length,), fill_value=0, dtype=torch.long, device=self._device)
 
         self.weights = torch.tensor([0.3, 0.3, 0.4]).to(device=self._device)
 
@@ -67,14 +62,20 @@ class CodonDesignEnv(DiscreteEnv):
         self.States: type[DiscreteStates] = self.States
 
     def set_weights(self, w: Union[list, torch.Tensor]):
-        """
-        Store the current preference weights (w) for conditional reward.
-        """
-        if not isinstance(w, torch.Tensor):
-            w = torch.tensor(w, dtype=torch.float32)
 
-        if w is not None:
-            self.weights = w
+        w_t = torch.tensor(w, dtype=torch.float32, device=self._device) if not isinstance(w, torch.Tensor) else w.to(self._device)
+        self.weights = w_t
+
+    # def set_protein_sequence(self, protein_seq: str):
+    #     """
+    #     Update the protein sequence and recompute necessary structures.
+    #     This allows dynamic protein sequence changes during training.
+    #     """
+    #     self.protein_seq = protein_seq
+    #     self.target_length = len(protein_seq)
+    #     self.seq_length = len(protein_seq)  # For backward compatibility
+    #     self.syn_indices = [get_synonymous_indices(aa) for aa in protein_seq]
+
 
     def step(
         self,
@@ -86,13 +87,12 @@ class CodonDesignEnv(DiscreteEnv):
         batch_size = states_tensor.shape[0]
         current_length = (states_tensor != -1).sum(dim=1)
 
-        max_length = states_tensor.shape[1]
         new_states = states_tensor.clone()
         valid_actions = actions.tensor.squeeze(-1)
         for i in range(batch_size):
 
             if (
-                current_length[i].item() < max_length
+                current_length[i].item() < self.seq_length
                 and valid_actions[i].item() != self.exit_action_index
             ):
                 new_states[i, int(current_length[i].item())] = valid_actions[i].item()
@@ -105,7 +105,7 @@ class CodonDesignEnv(DiscreteEnv):
     ) -> DiscreteStates:
 
         states_tensor = states.tensor
-        batch_size, seq_len = states_tensor.shape
+        batch_size = states_tensor.shape[0]
         current_length = (states_tensor != -1).sum(dim=1)
         new_states = states_tensor.clone()
 
@@ -130,11 +130,7 @@ class CodonDesignEnv(DiscreteEnv):
 
         for i in range(batch_size):
 
-            # print(current_length[i])
-
             cl = current_length[i].item()
-
-            # print(cl)
 
             if cl < self.seq_length:
 
@@ -152,120 +148,53 @@ class CodonDesignEnv(DiscreteEnv):
                 if last_codon >= 0:
                     backward_masks[i, int(last_codon)] = True
 
-        # print(states_tensor.shape)
-
         states.forward_masks = forward_masks
         states.backward_masks = backward_masks
 
-    def reward(
-        self,
-        states,
-        gc_target: float = 0.50,    # target GC content (fraction)
-        gc_width: float = 0.10,     # Gaussian width for GC reward
-        mfe_min: float = -500.0,    # lower bound for MFE scaling (most negative)
-        mfe_max: float = 0.0,       # upper bound for MFE scaling
-        cai_min: float = 0.0,       # min CAI for scaling
-        cai_max: float = 1.0,       # max CAI for scaling
-    ) -> torch.Tensor:
+    def reward(self, states) -> torch.Tensor:
 
-        states_tensor = states.tensor
+        if isinstance(states, torch.Tensor):
+            states_tensor = states
+        else:
+            states_tensor = states.tensor
+
         device = states_tensor.device
         batch_size = states_tensor.shape[0]
 
-        if isinstance(self.weights, torch.Tensor):
-            try:
-                weights_seq = self.weights.detach().cpu().tolist()
-            except Exception:
-                weights_seq = [float(x) for x in self.weights]
-        else:
-            weights_seq = list(self.weights)
+        w = self.weights
 
         rewards: list[float] = []
 
         for i in range(batch_size):
+
+            w_i = w[i] if w.dim() == 2 else w
             seq_indices = states_tensor[i]
 
-            # compute_reward returns (reward_float, (gc, mfe, cai))
-            # r, _ = compute_reward(
-            #     seq_indices,
-            #     self.codon_gc_counts,
-            #     weights=weights_seq,
-            #     gc_target=gc_target,
-            #     gc_width=gc_width,
-            #     mfe_min=mfe_min,
-            #     mfe_max=mfe_max,
-            #     cai_min=cai_min,
-            #     cai_max=cai_max,
-            # )
+            current_length = (seq_indices != -1).sum().item()
 
-            r, _ = compute_simple_reward(
-                seq_indices,
-                self.codon_gc_counts,
-                weights=weights_seq,
-                protein_seq=self.protein_seq,
-                reward_scale=5.0
-            )
+            if current_length != self.seq_length:
+                rewards.append(0)
+            else:
 
-            rewards.append(float(r))
+                valid_codons = seq_indices[seq_indices != -1]
+                r, _ = compute_simple_reward(
+                    valid_codons,
+                    self.codon_gc_counts,
+                    weights=w_i,
+                )
+                rewards.append(float(r))
 
         if len(rewards) == 0:
             return torch.zeros((0,), device=device, dtype=torch.float32)
 
-        combined = torch.tensor(rewards, device=device, dtype=torch.float32)
-
-        combined = torch.where(torch.isfinite(combined), combined, torch.zeros_like(combined))
-        combined = torch.clamp(combined, -1e6, 1e6)
-
-        return combined
-
+        return torch.tensor(rewards, device=device, dtype=torch.float32)
 
     def is_terminal(self, states: DiscreteStates) -> torch.Tensor:
         states_tensor = states.tensor
-        current_length = (states_tensor != -1).sum(dim=1)
-        return (current_length >= self.seq_length).bool()
+        return ((states_tensor != -1).sum(dim=1) == self.seq_length).bool()
 
     @staticmethod
     def make_sink_states_tensor(shape, device=None):
         return torch.zeros(shape, dtype=torch.long, device=device)
 
-
-
-    # def reward(self, states) -> torch.Tensor:
-
-    #     states_tensor = states.tensor
-    #     batch_size = states_tensor.shape[0]
-
-    #     gc_percents = []
-    #     mfe_energies = []
-    #     cai_scores = []
-
-    #     # Process each sequence individually
-    #     for i in range(batch_size):
-
-    #         seq_indices = states_tensor[i]
-
-    #         # Compute GC content
-    #         gc_percent = compute_gc_content_vectorized(
-    #             seq_indices, codon_gc_counts=self.codon_gc_counts
-    #         )
-    #         gc_percents.append(gc_percent)
-
-    #         # Compute MFE
-    #         mfe_energy = compute_mfe_energy(seq_indices)
-    #         mfe_energies.append(mfe_energy)
-
-    #         # Compute CAI
-    #         cai_score = compute_cai(seq_indices)
-    #         cai_scores.append(cai_score)
-
-    #     device = states_tensor.device
-    #     gc_percent = torch.tensor(gc_percents, device=device, dtype=torch.float32)
-    #     mfe_energy = torch.tensor(mfe_energies, device=device, dtype=torch.float32)
-    #     cai_score = torch.tensor(cai_scores, device=device, dtype=torch.float32)
-
-    #     # Calculate weighted reward
-    #     reward_components = torch.stack([gc_percent, -mfe_energy, cai_score], dim=-1)
-    #     reward = (reward_components * self.weights.to(device)).sum(dim=-1)
-
-    #     return reward
 

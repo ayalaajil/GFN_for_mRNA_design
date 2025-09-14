@@ -133,6 +133,7 @@ def build_conditional_model(preprocessor, env):
 
     # For now, we'll create a model that takes concatenated input
     # (state + conditioning weights)
+
     module_PF = MLP(
         input_dim=preprocessor.output_dim + 3,  # +3 for conditioning weights
         output_dim=env.n_actions,
@@ -172,17 +173,17 @@ def train_and_evaluate(model, env, preprocessor, training_weights, test_weights,
     reward_history = []
 
     for iteration in range(n_iterations):
+
         weights = random.choice(training_weights)
         env.set_weights(weights)
 
         if is_conditional:
-            # For conditional training, we need to provide conditioning
-            # This is a simplified approach - in practice you'd use proper conditional modules
-            conditioning = torch.tensor(weights, dtype=torch.float32, device=env.device)
-            conditioning = conditioning.unsqueeze(0).expand(2, -1)
 
-            # For this simplified version, we'll just use regular sampling
-            # In practice, you'd need to modify the sampler to handle conditioning
+
+            conditioning = torch.tensor(weights, dtype=torch.float32, device=env.device)
+            conditioning = conditioning.unsqueeze(0).expand(2, *conditioning.shape)
+
+
             trajectories = sampler.sample_trajectories(env, n=2)
         else:
             trajectories = sampler.sample_trajectories(env, n=2)

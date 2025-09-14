@@ -1,0 +1,33 @@
+Experiment Summary
+==================
+
+Timestamp: 2025-09-10_11-26
+Experiment Type: unconditional
+Protein Size: small
+Run Name: 
+Architecture: MLP
+Protein Sequence Length: 5
+Training Iterations: 300
+Batch Size: 16
+Learning Rate: 0.005
+Hidden Dimension: 256
+Number of Hidden Layers: 4
+SubTB Lambda: 0.9
+Epsilon: 0.25
+WandB Project: My_experiments
+Device: cuda
+
+Protein Sequence: MDSEM
+Natural mRNA Sequence: AUGGACAGUGAG
+
+Generated Files:
+- experiment_summary.txt (this file)
+- trained_gflownet__2025-09-10_11-26.pth (model weights)
+- generated_sequences_2025-09-10_11-26.txt (generated sequences)
+- metric_distributions_2025-09-10_11-26.png (metric histograms)
+- pareto_scatter_2025-09-10_11-26.png (Pareto front)
+- cai_vs_mfe_2025-09-10_11-26.png (CAI vs MFE plot)
+- gc_vs_mfe_2025-09-10_11-26.png (GC vs MFE plot)
+- comprehensive_comparison_2025-09-10_11-26.txt (comparison table)
+- metrics_summary_2025-09-10_11-26.txt (detailed metrics)
+- enhanced_diversity_analysis_2025-09-10_11-26.png (diversity plots)

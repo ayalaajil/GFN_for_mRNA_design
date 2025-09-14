@@ -1,7 +1,7 @@
 import numpy as np
 from tqdm import tqdm
-from utils import compute_reward
-from simple_reward_function import compute_simple_reward
+from wandb.sdk import wandb_init
+from reward import compute_simple_reward
 import wandb
 import time
 from plots import *
@@ -24,14 +24,7 @@ def train_conditional_gfn(args, env, gflownet, sampler, optimizer, scheduler, de
         sampled_weights.append(weights.tolist())
         env.set_weights(weights)
 
-        # 2) build conditioning tensor:
-        # Import the protein encoding function
-        # from main_conditional import encode_protein_sequence
-        # Encode protein sequence
-        # protein_features = encode_protein_sequence(protein_seq, device)
-        # conditioning = torch.cat([weights_tensor, protein_features])
-
-        # Combine weights and protein features
+        # 2) build conditioning tensor
         weights_tensor = torch.tensor(weights, dtype=torch.get_default_dtype(), device=device)
         conditioning = weights_tensor
         conditioning = conditioning.unsqueeze(0).expand(args.batch_size, *conditioning.shape)
@@ -63,7 +56,7 @@ def train_conditional_gfn(args, env, gflownet, sampler, optimizer, scheduler, de
 
             state = state.to(device)
             r, c = compute_simple_reward(
-                state, env.codon_gc_counts, env.weights, protein_seq=env.protein_seq
+                state, env.codon_gc_counts, env.weights
             )  # (gc, mfe, cai)
             rewards.append(r)
             components.append(c)
@@ -79,6 +72,8 @@ def train_conditional_gfn(args, env, gflownet, sampler, optimizer, scheduler, de
         avg_gc, avg_mfe, avg_cai = components_tensor.mean(dim=0).tolist()
 
         loss_history.append(loss.item())
+
+        # wandb.init(project=args.wandb_project, config=args, name=args.run_name)
 
         wandb.log(
             {
@@ -138,7 +133,7 @@ def train(args, env, gflownet, sampler, optimizer, scheduler, device):
 
             state = state.to(device)
             r, c = compute_simple_reward(
-                state, env.codon_gc_counts, env.weights, protein_seq=env.protein_seq
+                state, env.codon_gc_counts, env.weights
             )  # (gc, mfe, cai)
             rewards.append(r)
             components.append(c)

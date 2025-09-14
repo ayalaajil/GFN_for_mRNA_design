@@ -4,9 +4,14 @@ import torch
 import yaml
 import numpy as np
 from types import SimpleNamespace
-from typing import List, Tuple, Optional, Dict, Any, Sequence
-import math
+from typing import List, Dict
 import random
+import os
+from datetime import datetime
+from torchgfn.src.gfn.modules import ScalarEstimator
+from torchgfn.src.gfn.utils.modules import MLP
+
+
 
 def set_seed(seed: int = 42):
     random.seed(seed)
@@ -90,7 +95,7 @@ def extract_sequence_from_fasta(fasta_path: str) -> str:
     return sequence
 
 
-# --Helper: Tokenize codon string to LongTensor
+# --Helper: Tokenize codon string to LongTensor Indices
 def tokenize_sequence_to_tensor(seq):
     codons = [seq[i : i + 3] for i in range(0, len(seq), 3)]
     indices = [CODON_TO_IDX[c] for c in codons if c in CODON_TO_IDX]
@@ -147,7 +152,7 @@ def compute_gc_content_vectorized(
     device = indices.device
     gc_counts = codon_gc_counts[indices].sum(dim=0)
     total_nucleotides = indices.shape[0] * 3
-    gc_content = gc_counts / total_nucleotides * 100
+    gc_content = (gc_counts / total_nucleotides) * 100
 
     return gc_content.to(device)
 
@@ -166,8 +171,7 @@ def compute_mfe_energy(
         s = sol.solve(rna_str)
         energy = s.energy()
     except Exception as e:
-        print(f"Energy computation failed for: {rna_str}, error: {e}")
-        energy = float("inf")
+        energy = 0  # Default MFE value
 
     mfe_energies.append(energy)
     return torch.tensor(mfe_energies, dtype=torch.float32).to(device)
@@ -182,8 +186,8 @@ def compute_cai(indices: torch.Tensor, energies=None, loop_min=4) -> torch.Tenso
         calc = CAICalculator(rna_str)
         score = calc.compute_cai()
     except Exception as e:
-        print(f"CAI computation failed for: {rna_str}, error: {e}")
-        score = float("inf")
+        score = 0
+        
     cai_scores.append(score)
     return torch.tensor(cai_scores, dtype=torch.float32).to(device)
 
@@ -194,143 +198,91 @@ def compute_reward_components(state, codon_gc_counts):
     cai_score = compute_cai(state).item()
     return gc_content, mfe_energy, cai_score
 
-def compute_reward(
-    state,
-    codon_gc_counts,
-    weights: Sequence[float],
-    *,
-    gc_target: float = 0.50,    # target GC content (fraction)
-    gc_width: float = 0.10,     # Gaussian width for GC reward
-    mfe_min: float = -500.0,    # lower bound for MFE scaling (most negative)
-    mfe_max: float = 0.0,       # upper bound for MFE scaling
-    cai_min: float = 0.0,       # min CAI for scaling
-    cai_max: float = 1.0,       # max CAI for scaling
-) -> Tuple[float, Tuple[float, float, float]]:
 
-    gc_val, mfe_val, cai_val = compute_reward_components(state, codon_gc_counts)
-
-    # --- normalize---
-    # 1) GC reward: gaussian around gc_target
-    if gc_width == 0:
-        gc_reward = 1.0 if math.isclose(gc_val, gc_target) else 0.0
-    else:
-        gc_reward = math.exp(-0.5 * ((gc_val - gc_target) / gc_width) ** 2)
-
-    # 2) MFE reward: scaled to [0,1] with clipping then inverted (lower MFE -> higher reward)
-    mfe_span = mfe_max - mfe_min
-    if mfe_span == 0:
-        mfe_scaled = 0.0
-    else:
-        mfe_scaled = (mfe_val - mfe_min) / mfe_span
-    mfe_scaled = float(np.clip(mfe_scaled, 0.0, 1.0))
-    mfe_reward = 1.0 - mfe_scaled
-
-    # 3) CAI reward: scaled to [0,1] with clipping (higher CAI -> higher reward)
-    cai_span = cai_max - cai_min
-    if cai_span == 0:
-        cai_reward = 0.0
-    else:
-        cai_reward = float(np.clip((cai_val - cai_min) / cai_span, 0.0, 1.0))
-
-    # --- weights and final reward ---
-    if len(weights) != 3:
-        raise ValueError("weights must be length-3 for [gc, mfe, cai]")
-
-    w = [float(wi) for wi in weights]
-    comp_rewards = [gc_reward, mfe_reward, cai_reward]
-    reward = float(w[0] * comp_rewards[0] + w[1] * comp_rewards[1] + w[2] * comp_rewards[2])
-
-    if not math.isfinite(reward):
-        reward = float(np.clip(reward, -1e9, 1e9))
-
-    return reward, (gc_val, mfe_val, cai_val)
+def create_output_directory(args, config):
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M")
+    experiment_type = "conditional" if hasattr(args, 'conditional') and args.conditional else "unconditional"
+    protein_size = getattr(config, 'type', 'unknown')
+    run_name = args.run_name if args.run_name else config.run_name
+    output_dir = f"outputs/{experiment_type}/{protein_size}/{run_name}_{timestamp}"
+    os.makedirs(output_dir, exist_ok=True)
+    return output_dir, timestamp
 
 
+def create_experiment_summary(args, config, output_dir, timestamp, experiment_type, protein_size, device):
+    """Create experiment summary file with all relevant parameters and generated files."""
+    summary_file = f"{output_dir}/experiment_summary.txt"
+    with open(summary_file, "w") as f:
+        f.write(f"Experiment Summary\n")
+        f.write(f"==================\n\n")
+        f.write(f"Timestamp: {timestamp}\n")
+        f.write(f"Experiment Type: {experiment_type}\n")
+        f.write(f"Protein Size: {protein_size}\n")
+        f.write(f"Run Name: {args.run_name}\n")
+        f.write(f"Architecture: {getattr(config, 'arch', 'MLP')}\n")
+        f.write(f"Protein Sequence Length: {len(config.protein_seq)}\n")
+        f.write(f"Training Iterations: {args.n_iterations}\n")
+        f.write(f"Batch Size: {args.batch_size}\n")
+        f.write(f"Learning Rate: {args.lr}\n")
+        f.write(f"Hidden Dimension: {args.hidden_dim}\n")
+        f.write(f"Number of Hidden Layers: {args.n_hidden}\n")
+        f.write(f"SubTB Lambda: {args.subTB_lambda}\n")
+        f.write(f"Epsilon: {args.epsilon}\n")
+        f.write(f"WandB Project: {config.wandb_project}\n")
+        f.write(f"Device: {device}\n")
+        f.write(f"\nProtein Sequence: {config.protein_seq}\n")
+        f.write(f"Natural mRNA Sequence: {config.natural_mRNA_seq}\n")
+        f.write(f"\nGenerated Files:\n")
+        f.write(f"- experiment_summary.txt (this file)\n")
+        f.write(f"- trained_gflownet_{args.run_name}_{timestamp}.pth (model weights)\n")
+        f.write(f"- generated_sequences_{timestamp}.txt (generated sequences)\n")
+        f.write(f"- metric_distributions_{timestamp}.png (metric histograms)\n")
+        f.write(f"- pareto_scatter_{timestamp}.png (Pareto front)\n")
+        f.write(f"- cai_vs_mfe_{timestamp}.png (CAI vs MFE plot)\n")
+        f.write(f"- gc_vs_mfe_{timestamp}.png (GC vs MFE plot)\n")
+        f.write(f"- comprehensive_comparison_{timestamp}.txt (comparison table)\n")
+        f.write(f"- metrics_summary_{timestamp}.txt (detailed metrics)\n")
+        f.write(f"- enhanced_diversity_analysis_{timestamp}.png (diversity plots)\n")
 
 
+def set_up_logF_estimator(
+    args, preprocessor, pf_module
+):
+    """Returns a LogStateFlowEstimator."""
 
+    module = MLP(
+            input_dim=preprocessor.output_dim,
+            output_dim=1,
+            hidden_dim=args.hidden_dim,
+            n_hidden_layers=args.n_hidden,
+            trunk=(
+                pf_module.trunk
+                if args.tied and isinstance(pf_module.trunk, torch.nn.Module)
+                else None
+            ),
+        )
 
-
-
-
-
-
-
-
-
-
-
-
+    return ScalarEstimator(module=module, preprocessor=preprocessor)
 
 
 
+# ----------------------------- Protein Sequence Encoding ----------------------------
+def encode_protein_sequence(protein_seq: str, device: torch.device) -> torch.Tensor:
 
-# def compute_reward(
-#     state,
-#     codon_gc_counts,
-#     weights: Sequence[float],
-#     *,
-#     clip: Tuple[float, float] = (-100.0, 100.0),
-#     normalize: Optional[str] = None,
-#     stats: Optional[Dict[str, Any]] = None,
-# ) -> Tuple[float, Tuple[float, float, float]]:
-#     """
-#     Compute weighted reward from components for a single state.
+    # Amino acid to index mapping
+    aa_to_idx = {
+        'A': 0, 'C': 1, 'D': 2, 'E': 3, 'F': 4, 'G': 5, 'H': 6, 'I': 7,
+        'K': 8, 'L': 9, 'M': 10, 'N': 11, 'P': 12, 'Q': 13, 'R': 14,
+        'S': 15, 'T': 16, 'V': 17, 'W': 18, 'Y': 19, '*': 20
+    }
 
-#     Args:
-#       state: sequence representation (tensor / list / numpy) accepted by your compute_* helpers.
-#       codon_gc_counts: used by compute_gc_content_vectorized.
-#       weights: sequence-like of length 3 for [gc, -mfe, cai] respectively.
-#       clip: (min, max) clipping applied to each component before weighting.
-#       normalize: optional normalization mode: None | "zscore" | "minmax".
-#         If specified, `stats` must be provided with required fields:
-#           - for "zscore": stats = {"means": (m_gc, m_mfe_inv, m_cai), "stds": (s_gc, s_mfe_inv, s_cai)}
-#           - for "minmax": stats = {"mins": (min_gc, min_mfe_inv, min_cai), "maxs": (...)}
-#       stats: optional dict used by normalization.
+    one_hot_seq = torch.zeros(21, device=device)  # 20 amino acids + stop codon
 
-#     Returns:
-#       (reward, (gc, mfe, cai)) where reward is a plain Python float and
-#       components are the raw (gc, mfe, cai) values (mfe is raw negative energy).
-#     """
-#     gc, mfe, cai = compute_reward_components(state, codon_gc_counts)
+    for aa in protein_seq:
+        if aa in aa_to_idx:
+            idx = aa_to_idx[aa]
+            one_hot_seq[idx] = 1.0
 
-#     comp = [float(gc), float(-mfe), float(cai)]
 
-#     min_clip, max_clip = clip
-#     comp = [max(min(c, max_clip), min_clip) for c in comp]
+    return one_hot_seq
 
-#     if normalize is not None:
-#         if stats is None:
-#             raise ValueError("stats must be provided when normalize is set")
-#         if normalize == "zscore":
-#             means = stats.get("means")
-#             stds = stats.get("stds")
-#             if means is None or stds is None:
-#                 raise ValueError("stats must contain 'means' and 'stds' for zscore normalization")
-#             comp = [(c - m) / (s if s != 0.0 else 1.0) for c, m, s in zip(comp, means, stds)]
-#         elif normalize == "minmax":
-#             mins = stats.get("mins")
-#             maxs = stats.get("maxs")
-#             if mins is None or maxs is None:
-#                 raise ValueError("stats must contain 'mins' and 'maxs' for minmax normalization")
-#             comp = [
-#                 (c - mn) / (mx - mn) if (mx - mn) != 0.0 else 0.0
-#                 for c, mn, mx in zip(comp, mins, maxs)
-#             ]
-#         else:
-#             raise ValueError(f"Unknown normalize mode: {normalize}")
-
-#     if len(weights) != 3:
-#         raise ValueError("weights must be length-3 for [gc, -mfe, cai]")
-
-#     try:
-#         w = [float(x) for x in weights]
-#     except Exception:
-#         w = [float(torch.as_tensor(weights[i]).item()) if 'torch' in globals() else float(weights[i]) for i in range(3)]
-
-#     reward = sum(w_i * c_i for w_i, c_i in zip(w, comp))
-
-#     if not (isinstance(reward, (float, int)) and math.isfinite(float(reward))):
-#         reward = float(max(min(reward, max_clip), min_clip))
-
-#     return float(reward), (gc, mfe, cai)

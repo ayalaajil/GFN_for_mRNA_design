@@ -1,0 +1,39 @@
+Experiment Metrics Summary
+==============================
+
++--------------------+---------+------------------------------------------------+
+|       Metric       |  Value  |                  Description                   |
++--------------------+---------+------------------------------------------------+
+| Mean Edit Distance |  37.49  | Average Levenshtein distance between sequences |
+| Edit Distance Std  |   4.07  |      Standard deviation of edit distances      |
+|  Unique Sequences  |   100   |      Number of unique sequences generated      |
+|  Uniqueness Ratio  |  1.000  |       Ratio of unique to total sequences       |
+|    Mean Reward     |  0.631  |      Average reward across all sequences       |
+|     Reward Std     |  0.036  |         Standard deviation of rewards          |
+| Pareto Efficiency  |  0.170  |     Fraction of sequences on Pareto front      |
+|      GC Mean       |  49.711 |               Average GC content               |
+|      MFE Mean      | -69.887 |               Average MFE energy               |
+|      CAI Mean      |  0.510  |               Average CAI score                |
++--------------------+---------+------------------------------------------------+
+
+Detailed Statistics
+--------------------
+
+GC Content Statistics:
+  Mean: 49.711
+  Std:  1.477
+  Min:  45.778
+  Max:  54.222
+
+MFE Energy Statistics:
+  Mean: -69.887
+  Std:  4.684
+  Min:  -82.300
+  Max:  -59.367
+
+CAI Score Statistics:
+  Mean: 0.510
+  Std:  0.033
+  Min:  0.442
+  Max:  0.579
+

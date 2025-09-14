@@ -1,0 +1,119 @@
+Generalization Test Summary
+========================================
+
+Configurations tested: 13
+Total samples: 390
+
+Results by Configuration:
+------------------------------
+
+GC_only:
+  Weights: GC=1.00, MFE=0.00, CAI=0.00
+  Samples: 30 total, 30 unique
+  GC: 49.407 ± 2.094
+  MFE: -74.556 ± 5.813
+  CAI: 0.509 ± 0.032
+  Reward: 0.480 ± 0.070
+
+MFE_only:
+  Weights: GC=0.00, MFE=1.00, CAI=0.00
+  Samples: 30 total, 30 unique
+  GC: 49.585 ± 2.265
+  MFE: -73.509 ± 5.940
+  CAI: 0.527 ± 0.033
+  Reward: 0.980 ± 0.079
+
+CAI_only:
+  Weights: GC=0.00, MFE=0.00, CAI=1.00
+  Samples: 30 total, 30 unique
+  GC: 48.978 ± 1.911
+  MFE: -72.617 ± 4.952
+  CAI: 0.515 ± 0.036
+  Reward: 0.515 ± 0.036
+
+GC_MFE:
+  Weights: GC=0.50, MFE=0.50, CAI=0.00
+  Samples: 30 total, 30 unique
+  GC: 48.681 ± 1.716
+  MFE: -72.436 ± 4.698
+  CAI: 0.494 ± 0.036
+  Reward: 0.711 ± 0.050
+
+GC_CAI:
+  Weights: GC=0.50, MFE=0.00, CAI=0.50
+  Samples: 30 total, 30 unique
+  GC: 49.230 ± 1.946
+  MFE: -74.269 ± 5.238
+  CAI: 0.519 ± 0.045
+  Reward: 0.497 ± 0.046
+
+MFE_CAI:
+  Weights: GC=0.00, MFE=0.50, CAI=0.50
+  Samples: 30 total, 30 unique
+  GC: 49.763 ± 2.127
+  MFE: -73.402 ± 5.599
+  CAI: 0.517 ± 0.046
+  Reward: 0.748 ± 0.054
+
+Balanced:
+  Weights: GC=0.33, MFE=0.33, CAI=0.34
+  Samples: 30 total, 30 unique
+  GC: 49.452 ± 1.602
+  MFE: -72.127 ± 4.005
+  CAI: 0.510 ± 0.038
+  Reward: 0.650 ± 0.039
+
+Slightly_GC:
+  Weights: GC=0.50, MFE=0.25, CAI=0.25
+  Samples: 30 total, 30 unique
+  GC: 49.719 ± 2.294
+  MFE: -73.864 ± 5.823
+  CAI: 0.521 ± 0.037
+  Reward: 0.622 ± 0.057
+
+Slightly_MFE:
+  Weights: GC=0.25, MFE=0.50, CAI=0.25
+  Samples: 30 total, 30 unique
+  GC: 49.970 ± 1.468
+  MFE: -76.009 ± 5.390
+  CAI: 0.525 ± 0.050
+  Reward: 0.763 ± 0.052
+
+Slightly_CAI:
+  Weights: GC=0.25, MFE=0.25, CAI=0.50
+  Samples: 30 total, 30 unique
+  GC: 49.674 ± 1.674
+  MFE: -75.504 ± 3.793
+  CAI: 0.527 ± 0.034
+  Reward: 0.637 ± 0.027
+
+Very_GC:
+  Weights: GC=0.80, MFE=0.10, CAI=0.10
+  Samples: 30 total, 30 unique
+  GC: 49.096 ± 1.605
+  MFE: -74.184 ± 6.949
+  CAI: 0.505 ± 0.039
+  Reward: 0.525 ± 0.048
+
+Very_MFE:
+  Weights: GC=0.10, MFE=0.80, CAI=0.10
+  Samples: 30 total, 30 unique
+  GC: 49.200 ± 2.034
+  MFE: -72.140 ± 5.631
+  CAI: 0.512 ± 0.036
+  Reward: 0.868 ± 0.063
+
+Very_CAI:
+  Weights: GC=0.10, MFE=0.10, CAI=0.80
+  Samples: 30 total, 30 unique
+  GC: 48.785 ± 1.929
+  MFE: -72.410 ± 5.008
+  CAI: 0.506 ± 0.043
+  Reward: 0.547 ± 0.043
+
+Summary Statistics:
+--------------------
+GC Content - Mean: 49.349, Std: 0.379
+MFE - Mean: -73.617, Std: 1.218
+CAI - Mean: 0.514, Std: 0.009
+Reward - Mean: 0.657, Std: 0.147

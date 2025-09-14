@@ -20,20 +20,6 @@ def compute_identity(seq1, seq2):
     return (matches / length) * 100
 
 
-# def compare_to_natural(generated_sequences, natural_sequence):
-#     results = []
-#     for i, seq in enumerate(generated_sequences):
-#         lev_dist = levenshtein_distance(seq, natural_sequence)
-#         identity = compute_identity(seq, natural_sequence)
-#         results.append({
-#             "Sequence": f"Generated {i+1}",
-#             "Levenshtein": lev_dist,
-#             "Identity %": round(identity, 2),
-#             "Length difference": abs(len(seq) - len(natural_sequence))
-#         })
-#     return results
-
-
 def analyze_sequence_properties(
     seqs_tensor, natural_tensor, labels=None, out_dir="sequence_analysis", run_name=None
 ):
@@ -75,3 +61,4 @@ def analyze_sequence_properties(
         f.write(table.get_string())
 
     print(f"[INFO] Sequence analysis saved to {out_path}")
+

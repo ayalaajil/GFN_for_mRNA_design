@@ -1,15 +1,29 @@
-#!/usr/bin/env python3
-"""
-Organized experiment runner for conditional vs unconditional GFlowNet experiments
-on different protein sizes (small, medium, large).
-
-This script helps organize and run multiple experiments with proper output directory structure.
-"""
-
 import os
 import subprocess
 import argparse
+import yaml
 from datetime import datetime
+
+def get_run_name_from_config(config_file, experiment_type, protein_size=None):
+    try:
+        with open(config_file, 'r') as f:
+            config = yaml.safe_load(f)
+
+        # Get base run name from config, or use protein type as fallback
+        base_run_name = config.get('run_name', config.get('type', 'experiment'))
+
+        # Enhance with experiment type
+        exp_prefix = "condi" if experiment_type == "conditional" else "uncondi"
+        enhanced_run_name = f"{exp_prefix}_{base_run_name}"
+
+        return enhanced_run_name
+    except Exception as e:
+        print(f"Warning: Could not read config file {config_file}: {e}")
+        # Fallback to timestamp-based naming
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        exp_prefix = "condi" if experiment_type == "conditional" else "uncondi"
+        fallback_name = protein_size if protein_size else "experiment"
+        return f"{exp_prefix}_{fallback_name}_{timestamp}"
 
 def run_experiment(experiment_type, protein_size, config_file, additional_args=None):
     """
@@ -24,17 +38,16 @@ def run_experiment(experiment_type, protein_size, config_file, additional_args=N
 
         # Base command - use different scripts for conditional vs unconditional
     if experiment_type == "conditional":
-        cmd = ["python", "main_conditional.py", "--config_path", config_file]
+        cmd = ["python", "main_conditional.py", '--run_generalization_tests',  "--config_path", config_file]
     else:
-        cmd = ["python", "main.py", "--config_path", config_file]
+        cmd = ["python", "main.py", '--run_generalization_tests', "--config_path", config_file]
 
     # Add additional arguments
     if additional_args:
         cmd.extend(additional_args)
 
-    # Create run name
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    run_name = f"{experiment_type}_{protein_size}_{timestamp}"
+    # Create run name from config file enhanced with experiment type
+    run_name = get_run_name_from_config(config_file, experiment_type, protein_size)
     cmd.extend(["--run_name", run_name])
 
     print(f"\n{'='*60}")

@@ -3,9 +3,10 @@ import torch
 import seaborn as sns
 from Levenshtein import distance as levenshtein_distance
 import ternary
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+
+from evaluate import is_pareto_efficient_3d
 
 
 def plot_training_curves(
@@ -27,6 +28,7 @@ def plot_training_curves(
     colors = ["green", "blue", "orange"]
 
     for i, (label, color) in enumerate(zip(labels, colors)):
+        print(reward_tensor[:, i])
         axes[i + 1].plot(reward_tensor[:, i], label=label, color=color, linewidth=2)
         axes[i + 1].set_title(f"{label} Evolution", fontsize=14)
         axes[i + 1].set_xlabel("Iteration", fontsize=12)
@@ -210,31 +212,6 @@ def plot_pairwise_scatter(results, x_key, y_key):
     plt.tight_layout()
     plt.savefig(f"{y_key.upper()}_vs_{x_key.upper()}_by_config.png", dpi=300)
     plt.show()
-
-
-def is_pareto_efficient_3d(costs):
-    """
-    Determine Pareto-efficient points for 3 objectives.
-    costs: array of shape (N, 3) with objectives:
-        - (-CAI)  [we want to maximize CAI]
-        -  MFE    [we want to minimize MFE]
-        -  GC     [we want to maximize GC]
-    Returns: Boolean mask of Pareto-efficient points
-    """
-    is_efficient = np.ones(costs.shape[0], dtype=bool)
-
-    for i, c in enumerate(costs):
-
-        if is_efficient[i]:
-
-            # Remove dominated points
-            is_efficient[is_efficient] = np.any(
-                costs[is_efficient] > c, axis=1
-            ) | np.all(costs[is_efficient] == c, axis=1)
-            is_efficient[i] = True
-
-    return is_efficient
-
 
 def plot_pairwise_scatter_with_pareto(results, x_key="CAI", y_key="MFE"):
     """

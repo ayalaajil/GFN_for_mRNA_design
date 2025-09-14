@@ -11,7 +11,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'torchgfn', 'src'))
 import torch
 import numpy as np
 import wandb
-from simple_reward_function import compute_simple_reward
+from reward import compute_simple_reward
 from DeepArchi import *
 from comparison import analyze_sequence_properties
 from enhanced_comparison import run_comprehensive_analysis
@@ -19,7 +19,7 @@ from utils import *
 from plots import *
 from env import CodonDesignEnv
 from preprocessor import CodonSequencePreprocessor
-from train import train_conditional_gfn
+from train import *
 from evaluate import evaluate_conditional
 
 from gfn.gflownet import TBGFlowNet, SubTBGFlowNet
@@ -31,50 +31,6 @@ from gfn.estimators import (
 from gfn.utils.modules import MLP
 from ENN_ENH import MLP_ENN
 from gfn.samplers import Sampler
-from gfn.states import DiscreteStates, States
-
-
-# # ----------------------------- Protein Sequence Encoding ----------------------------
-# def encode_protein_sequence(protein_seq: str, device: torch.device) -> torch.Tensor:
-#     """
-#     Encode protein sequence into a fixed-size feature vector.
-#     Uses one-hot encoding for amino acids with additional features.
-
-#     Args:
-#         protein_seq: Protein sequence string
-#         device: PyTorch device
-
-#     Returns:
-#         Tensor of shape (feature_dim,) containing encoded protein features
-#     """
-#     # Amino acid to index mapping
-#     aa_to_idx = {
-#         'A': 0, 'C': 1, 'D': 2, 'E': 3, 'F': 4, 'G': 5, 'H': 6, 'I': 7,
-#         'K': 8, 'L': 9, 'M': 10, 'N': 11, 'P': 12, 'Q': 13, 'R': 14,
-#         'S': 15, 'T': 16, 'V': 17, 'W': 18, 'Y': 19, '*': 20
-#     }
-
-#     # One-hot encode amino acids
-#     one_hot = torch.zeros(21, device=device)  # 20 amino acids + stop codon
-#     aa_counts = torch.zeros(21, device=device)
-
-#     for aa in protein_seq:
-#         if aa in aa_to_idx:
-#             idx = aa_to_idx[aa]
-#             one_hot[idx] = 1.0
-#             aa_counts[idx] += 1.0
-
-#     # Normalize amino acid counts
-#     if len(protein_seq) > 0:
-#         aa_counts = aa_counts / len(protein_seq)
-
-#     # Additional features
-#     length_feature = torch.tensor([len(protein_seq) / 100.0], device=device)  # Normalized length
-
-#     # Combine all features
-#     protein_features = torch.cat([one_hot, aa_counts, length_feature])
-
-#     return protein_features
 
 
 # ----------------------------- Model helper wrappers ----------------------------
@@ -136,7 +92,7 @@ def build_tb_gflownet(env, pf_estimator, pb_estimator, preprocessor, cond_dim: i
 
 def build_conditional_pf_pb(env, preprocessor, args) -> Tuple[ConditionalDiscretePolicyEstimator, ConditionalDiscretePolicyEstimator]:
 
-    CONCAT_SIZE = 16
+    CONCAT_SIZE = 64
 
     if args.arch == 'MLP_EHH':
 
@@ -191,7 +147,7 @@ def build_conditional_pf_pb(env, preprocessor, args) -> Tuple[ConditionalDiscret
 
     # Encoder for the Conditioning information.
     module_cond = MLP(
-        input_dim=3,    # 3 weights + 43 protein features (21 one-hot + 21 counts + 1 length)
+        input_dim=3,    # 3 weights + 21 one-hot protein sequence
         output_dim=CONCAT_SIZE,
         hidden_dim=256,
     )
@@ -236,7 +192,8 @@ def build_conditional_logF_scalar_estimator(env, preprocessor) -> ConditionalSca
         A conditional scalar estimator for log flow
     """
 
-    CONCAT_SIZE = 16
+    CONCAT_SIZE = 64
+
     module_state_logF = MLP(
         input_dim=preprocessor.output_dim,
         output_dim=CONCAT_SIZE,
@@ -244,7 +201,7 @@ def build_conditional_logF_scalar_estimator(env, preprocessor) -> ConditionalSca
         n_hidden_layers=1,
     )
     module_conditioning_logF = MLP(
-        input_dim= 3,  # 3 weights + 43 protein features
+        input_dim= 3,  # 3 weights + 21 one-hot protein sequence
         output_dim=CONCAT_SIZE,
         hidden_dim=256,
         n_hidden_layers=1,
@@ -280,6 +237,7 @@ def main(args, config):
     if config.wandb_project:
 
         logging.info("Initializing Weights & Biases...")
+
         wandb.init(
             project=config.wandb_project,
             config=vars(config),
@@ -290,13 +248,10 @@ def main(args, config):
     logging.info("Creating environment...")
 
     env = CodonDesignEnv(protein_seq=config.protein_seq, device=device)
-    preprocessor = CodonSequencePreprocessor(env.seq_length, embedding_dim=args.embedding_dim, device=device)
+    preprocessor = CodonSequencePreprocessor(env.seq_length , embedding_dim=args.embedding_dim, device=device)
 
     logging.info(f"Protein sequence length: {len(config.protein_seq)}")
     logging.info("Building GFlowNet model...")
-
-
-    #gflownet = build_tb_gflownet(env, pf_estimator, pb_estimator, preprocessor, cond_dim= 3)
 
     gflownet, pf_estimator, pb_estimator = build_subTB_gflownet(env, preprocessor, args, lamda=args.subTB_lambda)
 
@@ -325,16 +280,21 @@ def main(args, config):
     logging.info("Starting training loop...")
     start_time = time.time()
 
-    loss_history, reward_history, reward_components, unique_seqs, sampled_weights = train_conditional_gfn(
-        args, env, gflownet, sampler, optimizer, scheduler, device )
+    # Train with protein sequence sampling
+    # training_result = train_conditional_gfn(
+    #     args, env, gflownet, sampler, optimizer, scheduler, device,
+    #     protein_pool=None, sample_proteins=True
+    # )
+
+
+    training_result = train_conditional_gfn(args, env, gflownet, sampler, optimizer, scheduler, device)
+
+    loss_history, reward_history, reward_components, unique_seqs = training_result
 
     total_time = time.time() - start_time
 
     logging.info(f"Training completed in {total_time:.2f} seconds.")
     plot_training_curves(loss_history, reward_components)
-
-    # plot_of_weights_over_iterations(sampled_weights)
-    # plot_ternary_plot_of_weights(sampled_weights)     ####### to remove we don't need it
 
     if config.wandb_project:
 
@@ -357,8 +317,8 @@ def main(args, config):
             env,
             sampler,
             weights=torch.tensor([0.3, 0.3, 0.4], device=device),
-            n_samples=args.n_samples
-                                                    # protein_seq=config.protein_seq,
+            n_samples=args.n_samples,
+            protein_seq=config.protein_seq,
             )
 
     inference_time = time.time() - start_inference_time
@@ -377,50 +337,16 @@ def main(args, config):
 
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M")
 
-    # Create organized output directory structure
-    # Format: outputs/{experiment_type}/{protein_size}/{run_name}_{timestamp}/
     experiment_type = "conditional"
     protein_size = getattr(config, 'type', 'unknown')
-    output_dir = f"outputs/{experiment_type}/{protein_size}/{args.run_name}_{timestamp}"
+    run_name = args.run_name if args.run_name else config.run_name
+    output_dir = f"outputs/{experiment_type}/{protein_size}/{run_name}_{timestamp}"
 
-    # Create directory if it doesn't exist
     os.makedirs(output_dir, exist_ok=True)
 
-    # Create experiment summary file
-    summary_file = f"{output_dir}/experiment_summary.txt"
-    with open(summary_file, "w") as f:
-        f.write(f"Experiment Summary\n")
-        f.write(f"==================\n\n")
-        f.write(f"Timestamp: {timestamp}\n")
-        f.write(f"Experiment Type: {experiment_type}\n")
-        f.write(f"Protein Size: {protein_size}\n")
-        f.write(f"Run Name: {args.run_name}\n")
-        f.write(f"Architecture: {getattr(config, 'arch', 'MLP')}\n")
-        f.write(f"Protein Sequence Length: {len(config.protein_seq)}\n")
-        f.write(f"Training Iterations: {args.n_iterations}\n")
-        f.write(f"Batch Size: {args.batch_size}\n")
-        f.write(f"Learning Rate: {args.lr}\n")
-        f.write(f"Hidden Dimension: {args.hidden_dim}\n")
-        f.write(f"Number of Hidden Layers: {args.n_hidden}\n")
-        f.write(f"SubTB Lambda: {args.subTB_lambda}\n")
-        f.write(f"Epsilon: {args.epsilon}\n")
-        f.write(f"WandB Project: {config.wandb_project}\n")
-        f.write(f"Device: {device}\n")
-        f.write(f"\nProtein Sequence: {config.protein_seq}\n")
-        f.write(f"Natural mRNA Sequence: {config.natural_mRNA_seq}\n")
-        f.write(f"\nGenerated Files:\n")
-        f.write(f"- experiment_summary.txt (this file)\n")
-        f.write(f"- trained_gflownet_{args.run_name}_{timestamp}.pth (model weights)\n")
-        f.write(f"- generated_sequences_{timestamp}.txt (generated sequences)\n")
-        f.write(f"- metric_distributions_{timestamp}.png (metric histograms)\n")
-        f.write(f"- pareto_scatter_{timestamp}.png (Pareto front)\n")
-        f.write(f"- cai_vs_mfe_{timestamp}.png (CAI vs MFE plot)\n")
-        f.write(f"- gc_vs_mfe_{timestamp}.png (GC vs MFE plot)\n")
-        f.write(f"- comprehensive_comparison_{timestamp}.txt (comparison table)\n")
-        f.write(f"- metrics_summary_{timestamp}.txt (detailed metrics)\n")
-        f.write(f"- enhanced_diversity_analysis_{timestamp}.png (diversity plots)\n")
+    create_experiment_summary(args, config, output_dir, timestamp, experiment_type, protein_size, device)
 
-    model_filename = f"{output_dir}/trained_gflownet_{args.run_name}_{timestamp}.pth"
+    model_filename = f"{output_dir}/trained_gflownet_{run_name}_{timestamp}.pth"
     torch.save(
         {
             "model_state": gflownet.state_dict(),
@@ -562,6 +488,8 @@ def main(args, config):
                 "Eval_mean_mfe": eval_mean_mfe,
                 "Eval_mean_cai": eval_mean_cai,
                 "Eval_avg_reward": Eval_avg_reward,
+
+
                 # Enhanced diversity and quality metrics
                 "diversity_mean_edit_distance": analysis_results['diversity_metrics']['mean_edit_distance'],
                 "diversity_std_edit_distance": analysis_results['diversity_metrics']['std_edit_distance'],
@@ -569,9 +497,6 @@ def main(args, config):
                 "diversity_uniqueness_ratio": analysis_results['diversity_metrics']['uniqueness_ratio'],
                 "quality_pareto_efficiency": analysis_results['quality_metrics']['pareto_efficiency'],
                 "quality_reward_mean": analysis_results['quality_metrics']['reward_stats']['mean'],
-                "quality_reward_std": analysis_results['quality_metrics']['reward_stats']['std'],
-                "Comprehensive Comparison Table": wandb.Image(analysis_results['table_path']),
-                "Metrics Summary": wandb.Image(analysis_results['summary_path']),
                 "Enhanced Diversity Analysis": wandb.Image(analysis_results['plot_path']),
             }
         )
@@ -588,7 +513,7 @@ if __name__ == "__main__":
     parser.add_argument("--no_cuda", action="store_true", help="Prevent CUDA usage")
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
 
-    parser.add_argument('--arch', type=str, default='MLP')
+    parser.add_argument('--arch', type=str, default='Transformer')
 
     # training-related
     parser.add_argument('--lr', type=float, default=0.005)
@@ -597,14 +522,14 @@ if __name__ == "__main__":
     parser.add_argument('--n_iterations', type=int, default=300)
     parser.add_argument('--n_samples', type=int, default=100)
     parser.add_argument('--top_n', type=int, default=50)
-    parser.add_argument('--batch_size', type=int, default=8)
+    parser.add_argument('--batch_size', type=int, default=16)
 
     parser.add_argument('--epsilon', type=float, default=0.25)
     parser.add_argument('--subTB_lambda', type=float, default=0.9)
 
     parser.add_argument('--embedding_dim', type=int, default=32)
-    parser.add_argument('--hidden_dim', type=int, default=128)
-    parser.add_argument('--n_hidden', type=int, default=2)
+    parser.add_argument('--hidden_dim', type=int, default=256)
+    parser.add_argument('--n_hidden', type=int, default=4)
 
     parser.add_argument('--tied', action='store_true')
     parser.add_argument('--clip_grad_norm', type=float, default=1.0)
@@ -618,6 +543,16 @@ if __name__ == "__main__":
     config = load_config(args.config_path)
 
     main(args, config)
+
+
+
+
+
+
+
+
+
+
 
 
 
