@@ -3,6 +3,7 @@ import sys
 import os
 import argparse
 from datetime import datetime
+import time
 sys.path.insert(0, os.path.dirname(__file__))
 from tqdm import tqdm
 import torch
@@ -18,6 +19,7 @@ from env import CodonDesignEnv
 from main_conditional import build_subTB_gflownet, load_config
 from preprocessor import CodonSequencePreprocessor2
 from gfn.samplers import Sampler
+from plots import plot_training_time_analysis, plot_task_distribution_analysis
 
 class MRNDesignCurriculum:
     """Curriculum learning wrapper for mRNA design"""
@@ -26,7 +28,6 @@ class MRNDesignCurriculum:
         self.tasks = tasks
         self.device =  torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
         self.num_tasks = len(tasks)
-
 
         self.config = curriculum_config or {
             'lpe': 'Linreg',        # Learning Progress Estimator (Linreg works better than EMA in noisy rewards)
@@ -41,18 +42,6 @@ class MRNDesignCurriculum:
             'acp_MR_att_succ': 0.1, # Increase successor attention (gradual forward push)
         }
 
-        # self.config = curriculum_config or {
-        #     'lpe': 'Linreg',  # Learning Progress Estimator
-        #     'acp': 'MR',      # Attention Computer (Mastering Rate)
-        #     'a2d': 'Boltzmann',    # Attention to Distribution converter
-        #     'a2d_tau': 0.1,
-        #     'lpe_K': 10,      # Window size for learning progress
-        #     'acp_MR_K': 10,   # Window size for performance averaging
-        #     'acp_MR_power': 6, # Power for ancestor mastering rate
-        #     'acp_MR_pot_prop': 0.5, # Potential proportion
-        #     'acp_MR_att_pred': 0.2,  # Attention to predecessors
-        #     'acp_MR_att_succ': 0.05, # Attention to successors
-        # }
 
         self.protein_loader = ProteinDatasetLoader()
 
@@ -319,7 +308,22 @@ def train_with_curriculum(args, config, curriculum_tasks):
     print(f"Initial learning rate: {args.lr}")
     print("=" * 80)
 
+    # Global time tracking
+    time_start = time.time()
+    training_phase_times = {
+        'initialization': 0.0,
+        'training': 0.0,
+        'evaluation': 0.0,
+        'total': 0.0
+    }
+    task_times = {task: 0.0 for task in curriculum_tasks_tuples}
+    task_distribution_history = []
+    time_per_iteration = []
+
+    print(f"Training started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+
     while global_step < total_steps:
+        iteration_start_time = time.time()
 
         # Teacher samples a task
         current_task, current_task_idx = curriculum.sample_task()
@@ -332,6 +336,14 @@ def train_with_curriculum(args, config, curriculum_tasks):
 
         current_task_key = tuple(current_task) if isinstance(current_task, list) else current_task
         training_stats['task_counts'][current_task_key] += 1
+
+        # Record task distribution
+        task_distribution_history.append({
+            'step': global_step,
+            'task': current_task_key,
+            'task_idx': current_task_idx,
+            'distribution': curriculum.dist.copy()
+        })
 
         if isinstance(current_task, (list, tuple)) and len(current_task) == 2:
             task_display = f"Range [{current_task[0]}-{current_task[1]}]"
@@ -357,6 +369,7 @@ def train_with_curriculum(args, config, curriculum_tasks):
 
 
         task_losses = []
+        task_start_time = time.time()
 
         for step_in_task in  (pbar := tqdm(range(train_steps_per_task), dynamic_ncols=True)):
 
@@ -396,7 +409,6 @@ def train_with_curriculum(args, config, curriculum_tasks):
                 task_key = current_task_key
                 training_stats['recent_losses'][task_key].append(loss.item())
 
-                # update per-task EMA
                 prev = training_stats['per_task_ema'][task_key]
                 training_stats['per_task_ema'][task_key] = (
                     loss.item() if prev is None else EMA_ALPHA * loss.item() + (1 - EMA_ALPHA) * prev
@@ -412,7 +424,7 @@ def train_with_curriculum(args, config, curriculum_tasks):
                     for t, q in training_stats['recent_losses'].items()
                 }
 
-                # unweighted global mean: average of per-task means that exist
+
                 valid_means = [m for m in per_task_means.values() if m is not None]
                 global_unweighted_mean = float(np.mean(valid_means)) if valid_means else None
 
@@ -429,7 +441,7 @@ def train_with_curriculum(args, config, curriculum_tasks):
                     if cur is None or prev is None:
                         per_task_lp[t] = None
                     else:
-                        per_task_lp[t] = prev - cur  # positive => loss decreased (improvement)
+                        per_task_lp[t] = prev - cur
 
                 print(f" Step {step_in_task + 1}/{train_steps_per_task}: Loss = {loss.item():.6f}")
 
@@ -438,19 +450,11 @@ def train_with_curriculum(args, config, curriculum_tasks):
                 training_stats['skipped_steps'] += 1
                 continue
 
-            if task_losses:
-
-                avg_loss = sum(task_losses) / len(task_losses)
-                print(f"Task {current_task} completed - Avg loss: {avg_loss:.6f}")
-                if args.wandb_project:
-                    wandb.log({
-                        'training/avg_task_loss': avg_loss,
-                        'training/current_task_idx': current_task_idx,
-                        'global_step': global_step
-                    })
-            else:
-                print(f"Task {current_task} completed - No valid steps")
-
+            # Track task completion time
+            task_end_time = time.time()
+            task_duration = task_end_time - task_start_time
+            task_times[current_task_key] += task_duration
+            training_phase_times['training'] += task_duration
 
             if args.wandb_project:
 
@@ -458,6 +462,7 @@ def train_with_curriculum(args, config, curriculum_tasks):
                     'training/global_unweighted_mean_loss': global_unweighted_mean,
                     'training/global_ema_loss': training_stats['global_ema'],
                     'training/step': global_step,
+                    'training/elapsed_time': time.time() - time_start,
 
                     **{f'task/{t}_mean_loss': (m if m is not None else -1) for t, m in per_task_means.items()},
                     **{f'task/{t}_ema_loss': (training_stats['per_task_ema'][t] if training_stats['per_task_ema'][t] is not None else -1) for t in per_task_means},
@@ -466,7 +471,7 @@ def train_with_curriculum(args, config, curriculum_tasks):
 
 
         if global_step % eval_every == 0:
-
+                eval_start_time = time.time()
                 eval_log_data = {'global_step': global_step}
 
                 print(f"\n EVALUATION at step {global_step+1}")
@@ -485,10 +490,8 @@ def train_with_curriculum(args, config, curriculum_tasks):
                     if performance > training_stats['best_performance'][task_key]:
                         training_stats['best_performance'][task_key] = performance
 
-
                     eval_log_data[f'eval/perf_task_{task_idx}'] = performance
                     eval_log_data[f'eval/best_perf_task_{task_idx}'] = training_stats['best_performance'][task_key]
-
 
                     print(f"Task {task_idx} ({task}): Performance = {performance:.4f} (Best: {training_stats['best_performance'][task_key]:.4f})")
 
@@ -505,6 +508,12 @@ def train_with_curriculum(args, config, curriculum_tasks):
                 eval_log_data['eval/task_avg_loss'] = avg_task_loss
                 eval_log_data['training/learning_rate'] = optimizer.param_groups[0]['lr']
 
+                # Track evaluation time
+                eval_end_time = time.time()
+                eval_duration = eval_end_time - eval_start_time
+                training_phase_times['evaluation'] += eval_duration
+                eval_log_data['eval/evaluation_duration'] = eval_duration
+
                 if args.wandb_project:
                     wandb.log(eval_log_data)
 
@@ -514,8 +523,21 @@ def train_with_curriculum(args, config, curriculum_tasks):
         else:
             print(f"Task {current_task} completed - No valid steps")
 
+        # Track iteration time
+        iteration_end_time = time.time()
+        iteration_duration = iteration_end_time - iteration_start_time
+        time_per_iteration.append(iteration_duration)
+
         global_step += 1
 
+    total_time = time.time() - time_start
+    training_phase_times['total'] = total_time
+    training_phase_times['initialization'] = time_start - time_start
+
+    print(f"Training completed in {total_time:.2f} seconds.")
+    print(f"Training phase breakdown:")
+    print(f"  - Training: {training_phase_times['training']:.2f}s ({training_phase_times['training']/total_time*100:.1f}%)")
+    print(f"  - Evaluation: {training_phase_times['evaluation']:.2f}s ({training_phase_times['evaluation']/total_time*100:.1f}%)")
 
     print("\n" + "=" * 80)
     print("TRAINING COMPLETED - FINAL SUMMARY")
@@ -528,11 +550,13 @@ def train_with_curriculum(args, config, curriculum_tasks):
         task_key = curriculum_tasks_tuples[i]
         count = training_stats['task_counts'][task_key]
         best_perf = training_stats['best_performance'][task_key]
+        task_time = task_times[task_key]
+        avg_time_per_task = task_time / count if count > 0 else 0
         if isinstance(task, (list, tuple)) and len(task) == 2:
             task_display = f"Range [{task[0]}-{task[1]}]"
         else:
             task_display = f"Length {task}"
-        print(f"  Task {task_display}: {count} times, Best performance: {best_perf:.4f}")
+        print(f"  Task {task_display}: {count} times, Best performance: {best_perf:.4f}, Total time: {task_time:.2f}s, Avg time: {avg_time_per_task:.2f}s")
 
     print("\nFinal Curriculum Distribution:")
     for i, prob in enumerate(curriculum.dist):
@@ -543,6 +567,10 @@ def train_with_curriculum(args, config, curriculum_tasks):
             task_display = f"Length {task}"
         print(f"  Task {task_display}: {prob:.4f}")
     print("=" * 80)
+
+    print("\nCreating time and task distribution plots...")
+    plot_training_time_analysis(task_distribution_history, training_phase_times, task_times, time_per_iteration, output_dir)
+    plot_task_distribution_analysis(task_distribution_history, curriculum_tasks, output_dir)
 
     if args.wandb_project:
 
@@ -555,20 +583,25 @@ def train_with_curriculum(args, config, curriculum_tasks):
             'final/learning_rate': training_stats['current_lr'],
             'final/overall_avg_loss': training_stats['total_loss']/training_stats['valid_steps'] if training_stats['valid_steps'] > 0 else 0,
             'final/task_counts': task_counts_str,
-            'final/best_performances': best_performances_str
+            'final/best_performances': best_performances_str,
+            'final/total_training_time': total_time,
+            'final/training_phase_time': training_phase_times['training'],
+            'final/evaluation_phase_time': training_phase_times['evaluation'],
+            'final/avg_time_per_iteration': np.mean(time_per_iteration) if time_per_iteration else 0,
+            'final/std_time_per_iteration': np.std(time_per_iteration) if time_per_iteration else 0
         }
 
         for i, task in enumerate(curriculum_tasks):
             task_key = curriculum_tasks_tuples[i]
             final_metrics[f'final/task_{i}_count'] = training_stats['task_counts'][task_key]
             final_metrics[f'final/task_{i}_best_performance'] = training_stats['best_performance'][task_key]
+            final_metrics[f'final/task_{i}_total_time'] = task_times[task_key]
+            final_metrics[f'final/task_{i}_avg_time'] = task_times[task_key] / training_stats['task_counts'][task_key] if training_stats['task_counts'][task_key] > 0 else 0
 
-
-        wandb.log(final_metrics)
-
-        wandb.log({
-        'final/total_steps': global_step,
+        wandb.log({**final_metrics,
         'final/distribution_entropy': float(scipy.stats.entropy(curriculum.dist, base=2)),
+        'final/training_time_analysis': wandb.Image(f"{output_dir}/training_time_analysis.png"),
+        'final/task_distribution_analysis': wandb.Image(f"{output_dir}/task_distribution_analysis.png"),
         })
 
         wandb.summary['best_overall_performance'] = max(training_stats['best_performance'].values())
@@ -662,16 +695,16 @@ def main():
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
 
     parser.add_argument('--curriculum_tasks', nargs='+', type=str,
-                       default=['[25,40]', '[45,60]', '[65,80]', '[85,120]', '[125,180]',  '[185,250]'],           # '[125,180]', '[185,250]'
+                       default=['[25,40]', '[45,60]', '[65,80]', '[85,120]', '[125,180]'],
                        help='Protein length ranges for curriculum learning (format: [min,max])')
 
     parser.add_argument('--curriculum_type', type=str, default='length',
                        choices=['length', 'complexity'],
                        help='Type of curriculum: length-based or complexity-based')
 
-    parser.add_argument('--n_iterations', type=int, default=100)    #50
-    parser.add_argument('--eval_every', type=int, default=2)    #5
-    parser.add_argument('--train_steps_per_task', type=int, default=100)  #200   # total training steps are n_iterations * train_steps_per_task = 100 * 100 = 10000
+    parser.add_argument('--n_iterations', type=int, default=10)    #50
+    parser.add_argument('--eval_every', type=int, default=5)    #5
+    parser.add_argument('--train_steps_per_task', type=int, default=200)  #200   # total training steps are n_iterations * train_steps_per_task = 100 * 100 = 10000
 
     parser.add_argument('--embedding_dim', type=int, default=32)
     parser.add_argument('--hidden_dim', type=int, default=256)
@@ -688,14 +721,16 @@ def main():
     parser.add_argument('--subTB_weighting', type=str, default="geometric_within")
     parser.add_argument('--n_samples', type=int, default=100)
     parser.add_argument('--top_n', type=int, default=50)
-    parser.add_argument('--batch_size', type=int, default=16)
+
+    parser.add_argument('--batch_size', type=int, default=8)
     parser.add_argument('--epsilon', type=float, default=0.25)
+
     parser.add_argument('--verbose', action='store_true', help='Enable verbose logging')
     parser.add_argument('--save_progress', action='store_true', default=True, help='Save training progress to files')
 
     parser.add_argument("--config_path", type=str, default="config.yaml")
 
-    parser.add_argument('--wandb_project', type=str, default='mRNA_GFN_Experiments_CL')
+    parser.add_argument('--wandb_project', type=str, default='mRNA_GFN_Experiments_CL_FINAL')
 
 
     args = parser.parse_args()

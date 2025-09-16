@@ -1,3 +1,7 @@
+#!/usr/bin/env python3
+"""
+Unconditional GFlowNet training script for mRNA design.
+"""
 import sys
 import os
 sys.path.insert(0,os.path.join(os.path.dirname(__file__), 'torchgfn', 'src'))
@@ -429,7 +433,7 @@ if __name__ == "__main__":
     parser.add_argument('--lr', type=float, default=0.005)
     parser.add_argument('--lr_logz', type=float, default=1e-1)
 
-    parser.add_argument('--n_iterations', type=int, default=300)
+    parser.add_argument('--n_iterations', type=int, default=200)
     parser.add_argument('--n_samples', type=int, default=100)
     parser.add_argument('--top_n', type=int, default=50)
     parser.add_argument('--batch_size', type=int, default=16)

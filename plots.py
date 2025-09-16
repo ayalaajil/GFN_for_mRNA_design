@@ -284,3 +284,168 @@ def plot_pairwise_scatter_with_pareto(results, x_key="CAI", y_key="MFE"):
     plt.tight_layout()
     plt.savefig(f"{y_key.upper()}_vs_{x_key.upper()}_with_Pareto.png", dpi=300)
     plt.show()
+
+
+def plot_training_time_analysis(task_distribution_history, training_phase_times, task_times, time_per_iteration, output_dir="."):
+    """Create comprehensive time analysis plots for curriculum learning"""
+
+    # Create figure with subplots
+    fig, axes = plt.subplots(2, 2, figsize=(15, 12))
+    fig.suptitle("Training Time Analysis", fontsize=16, fontweight='bold')
+
+    # 1. Training phase breakdown (pie chart)
+    phases = ['Training', 'Evaluation', 'Other']
+    phase_times = [
+        training_phase_times['training'],
+        training_phase_times['evaluation'],
+        training_phase_times['total'] - training_phase_times['training'] - training_phase_times['evaluation']
+    ]
+    colors = ['#ff9999', '#66b3ff', '#99ff99']
+
+    axes[0, 0].pie(phase_times, labels=phases, autopct='%1.1f%%', colors=colors, startangle=90)
+    axes[0, 0].set_title('Training Phase Distribution')
+
+    # 2. Task time distribution (bar chart)
+    task_names = []
+    task_time_values = []
+    for task, time_val in task_times.items():
+        if isinstance(task, (list, tuple)) and len(task) == 2:
+            task_names.append(f"[{task[0]}-{task[1]}]")
+        else:
+            task_names.append(f"Len {task}")
+        task_time_values.append(time_val)
+
+    bars = axes[0, 1].bar(range(len(task_names)), task_time_values, color='skyblue', alpha=0.7)
+    axes[0, 1].set_title('Time Spent per Task')
+    axes[0, 1].set_xlabel('Tasks')
+    axes[0, 1].set_ylabel('Time (seconds)')
+    axes[0, 1].set_xticks(range(len(task_names)))
+    axes[0, 1].set_xticklabels(task_names, rotation=45, ha='right')
+
+    # Add value labels on bars
+    for bar, value in zip(bars, task_time_values):
+        axes[0, 1].text(bar.get_x() + bar.get_width()/2, bar.get_height() + max(task_time_values)*0.01,
+                       f'{value:.1f}s', ha='center', va='bottom', fontsize=8)
+
+    # 3. Time per iteration over training
+    axes[1, 0].plot(time_per_iteration, linewidth=1, alpha=0.7)
+    axes[1, 0].set_title('Time per Iteration')
+    axes[1, 0].set_xlabel('Iteration')
+    axes[1, 0].set_ylabel('Time (seconds)')
+    axes[1, 0].grid(True, alpha=0.3)
+
+    # Add moving average
+    if len(time_per_iteration) > 10:
+        window_size = min(10, len(time_per_iteration) // 5)
+        moving_avg = pd.Series(time_per_iteration).rolling(window=window_size).mean()
+        axes[1, 0].plot(moving_avg, color='red', linewidth=2, label=f'Moving Avg (window={window_size})')
+        axes[1, 0].legend()
+
+    # 4. Cumulative time per task
+    task_cumulative_times = {}
+    for record in task_distribution_history:
+        task = record['task']
+        if task not in task_cumulative_times:
+            task_cumulative_times[task] = []
+        task_cumulative_times[task].append(record['step'])
+
+    for i, (task, steps) in enumerate(task_cumulative_times.items()):
+        cumulative_time = [task_times[task] * (step / max(steps)) if max(steps) > 0 else 0 for step in steps]
+        task_label = f"[{task[0]}-{task[1]}]" if isinstance(task, (list, tuple)) and len(task) == 2 else f"Len {task}"
+        axes[1, 1].plot(steps, cumulative_time, marker='o', markersize=3, label=task_label, alpha=0.7)
+
+    axes[1, 1].set_title('Cumulative Time per Task')
+    axes[1, 1].set_xlabel('Training Step')
+    axes[1, 1].set_ylabel('Cumulative Time (seconds)')
+    axes[1, 1].legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+    axes[1, 1].grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    plt.savefig(f"{output_dir}/training_time_analysis.png", dpi=300, bbox_inches='tight')
+    plt.close()
+
+    print(f"Time analysis plot saved to {output_dir}/training_time_analysis.png")
+
+
+def plot_task_distribution_analysis(task_distribution_history, curriculum_tasks, output_dir="."):
+    """Create task distribution analysis plots for curriculum learning"""
+
+    if not task_distribution_history:
+        print("No task distribution history available for plotting")
+        return
+
+    # Create figure with subplots
+    fig, axes = plt.subplots(2, 2, figsize=(15, 12))
+    fig.suptitle("Task Distribution Analysis", fontsize=16, fontweight='bold')
+
+    # Extract data
+    steps = [record['step'] for record in task_distribution_history]
+    task_indices = [record['task_idx'] for record in task_distribution_history]
+    distributions = [record['distribution'] for record in task_distribution_history]
+
+    # 1. Task selection over time
+    axes[0, 0].plot(steps, task_indices, marker='o', markersize=2, alpha=0.7)
+    axes[0, 0].set_title('Task Selection Over Time')
+    axes[0, 0].set_xlabel('Training Step')
+    axes[0, 0].set_ylabel('Task Index')
+    axes[0, 0].set_yticks(range(len(curriculum_tasks)))
+    axes[0, 0].grid(True, alpha=0.3)
+
+    # Add task labels
+    task_labels = []
+    for task in curriculum_tasks:
+        if isinstance(task, (list, tuple)) and len(task) == 2:
+            task_labels.append(f"[{task[0]}-{task[1]}]")
+        else:
+            task_labels.append(f"Len {task}")
+    axes[0, 0].set_yticklabels(task_labels)
+
+    # 2. Task distribution evolution
+    task_dist_matrix = np.array(distributions).T  # Shape: (n_tasks, n_steps)
+
+    for i in range(len(curriculum_tasks)):
+        axes[0, 1].plot(steps, task_dist_matrix[i], label=task_labels[i], linewidth=2)
+
+    axes[0, 1].set_title('Task Distribution Evolution')
+    axes[0, 1].set_xlabel('Training Step')
+    axes[0, 1].set_ylabel('Probability')
+    axes[0, 1].legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+    axes[0, 1].grid(True, alpha=0.3)
+
+    # 3. Task selection frequency (histogram)
+    task_counts = np.bincount(task_indices, minlength=len(curriculum_tasks))
+    bars = axes[1, 0].bar(range(len(curriculum_tasks)), task_counts, color='lightcoral', alpha=0.7)
+    axes[1, 0].set_title('Task Selection Frequency')
+    axes[1, 0].set_xlabel('Tasks')
+    axes[1, 0].set_ylabel('Selection Count')
+    axes[1, 0].set_xticks(range(len(curriculum_tasks)))
+    axes[1, 0].set_xticklabels(task_labels, rotation=45, ha='right')
+
+    # Add count labels on bars
+    for bar, count in zip(bars, task_counts):
+        axes[1, 0].text(bar.get_x() + bar.get_width()/2, bar.get_height() + max(task_counts)*0.01,
+                       str(count), ha='center', va='bottom', fontsize=8)
+
+    # 4. Distribution entropy over time
+    from scipy.stats import entropy
+    entropies = [entropy(dist, base=2) for dist in distributions]
+
+    axes[1, 1].plot(steps, entropies, linewidth=2, color='purple')
+    axes[1, 1].set_title('Distribution Entropy Over Time')
+    axes[1, 1].set_xlabel('Training Step')
+    axes[1, 1].set_ylabel('Entropy (bits)')
+    axes[1, 1].grid(True, alpha=0.3)
+
+    # Add moving average for entropy
+    if len(entropies) > 10:
+        window_size = min(10, len(entropies) // 5)
+        moving_avg_entropy = pd.Series(entropies).rolling(window=window_size).mean()
+        axes[1, 1].plot(steps, moving_avg_entropy, color='red', linewidth=2,
+                       label=f'Moving Avg (window={window_size})')
+        axes[1, 1].legend()
+
+    plt.tight_layout()
+    plt.savefig(f"{output_dir}/task_distribution_analysis.png", dpi=300, bbox_inches='tight')
+    plt.close()
+
+    print(f"Task distribution analysis plot saved to {output_dir}/task_distribution_analysis.png")

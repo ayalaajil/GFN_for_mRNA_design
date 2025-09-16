@@ -1,3 +1,8 @@
+#!/usr/bin/env python3
+"""
+Conditional GFlowNet training script for mRNA design.
+"""
+
 import sys
 import os
 import time
@@ -20,7 +25,7 @@ from plots import *
 from env import CodonDesignEnv
 from preprocessor import CodonSequencePreprocessor
 from train import *
-from evaluate import evaluate_conditional
+from evaluate import *
 
 from gfn.gflownet import TBGFlowNet, SubTBGFlowNet
 from gfn.estimators import (
@@ -147,7 +152,7 @@ def build_conditional_pf_pb(env, preprocessor, args) -> Tuple[ConditionalDiscret
 
     # Encoder for the Conditioning information.
     module_cond = MLP(
-        input_dim=3,    # 3 weights + 21 one-hot protein sequence
+        input_dim=3,
         output_dim=CONCAT_SIZE,
         hidden_dim=256,
     )
@@ -201,7 +206,7 @@ def build_conditional_logF_scalar_estimator(env, preprocessor) -> ConditionalSca
         n_hidden_layers=1,
     )
     module_conditioning_logF = MLP(
-        input_dim= 3,  # 3 weights + 21 one-hot protein sequence
+        input_dim= 3,
         output_dim=CONCAT_SIZE,
         hidden_dim=256,
         n_hidden_layers=1,
@@ -280,20 +285,13 @@ def main(args, config):
     logging.info("Starting training loop...")
     start_time = time.time()
 
-    # Train with protein sequence sampling
-    # training_result = train_conditional_gfn(
-    #     args, env, gflownet, sampler, optimizer, scheduler, device,
-    #     protein_pool=None, sample_proteins=True
-    # )
-
-
     training_result = train_conditional_gfn(args, env, gflownet, sampler, optimizer, scheduler, device)
 
-    loss_history, reward_history, reward_components, unique_seqs = training_result
+    loss_history, reward_history, reward_components, unique_seqs, sampled_weights = training_result
 
-    total_time = time.time() - start_time
+    training_time = time.time() - start_time
 
-    logging.info(f"Training completed in {total_time:.2f} seconds.")
+    logging.info(f"Training completed in {training_time:.2f} seconds.")
     plot_training_curves(loss_history, reward_components)
 
     if config.wandb_project:
@@ -302,7 +300,7 @@ def main(args, config):
         wandb.log(
             {
                 "final_loss": loss_history[-1],
-                "total_training_time": total_time,
+                "total_training_time": training_time,
                 "final_unique_sequences": len(unique_seqs),
                 "training_curves": wandb.Image("training_curves.png"),
             }
@@ -313,12 +311,12 @@ def main(args, config):
 
     with torch.no_grad():
 
-        samples, gc_list, mfe_list, cai_list = evaluate_conditional(
+        samples, gc_list, mfe_list, cai_list = evaluate(
             env,
             sampler,
             weights=torch.tensor([0.3, 0.3, 0.4], device=device),
             n_samples=args.n_samples,
-            protein_seq=config.protein_seq,
+            conditional=True,
             )
 
     inference_time = time.time() - start_inference_time
@@ -426,8 +424,7 @@ def main(args, config):
     wandb.log({"Top_Sequences": table})
 
     sequences = [seq for seq, _ in sorted_samples[:args.top_n]]
-    distances = analyze_diversity(sequences)
-
+    distances = analyze_diversity(sequences, out_path=f"{output_dir}/edit_distance_distribution_{timestamp}.png")
     generated_sequences_tensor = [tokenize_sequence_to_tensor(seq) for seq in sequences]
 
     # best-by-objective sequences
@@ -447,6 +444,7 @@ def main(args, config):
 
     # Run comprehensive analysis with enhanced metrics
     logging.info("Running comprehensive analysis with diversity and quality metrics...")
+
     analysis_results = run_comprehensive_analysis(
         samples, gc_list, mfe_list, cai_list, config.natural_mRNA_seq,
         output_dir, timestamp, top_n=args.top_n
@@ -458,12 +456,11 @@ def main(args, config):
         total_reward = 0.0
         for seq in samples.keys():
 
-            seq_indices = torch.tensor([env.codon_to_idx[codon] for codon in seq], device=env.device)
+            seq_indices = tokenize_sequence_to_tensor(seq).to(env.device)
             reward, _ = compute_simple_reward(
                 seq_indices,
                 env.codon_gc_counts,
-                env.weights,
-                protein_seq=env.protein_seq
+                env.weights
             )
             total_reward += reward
         Eval_avg_reward = total_reward / len(samples)
@@ -475,7 +472,7 @@ def main(args, config):
         wandb.log(
             {
                 "Pareto Plot": wandb.Image(f"{output_dir}/pareto_scatter_{timestamp}.png"),
-                "Training_time": total_time,
+                "Training_time": training_time,
                 "Inference_time": inference_time,
                 "Avg_time_per_sequence": avg_time_per_seq,
                 "Reward Metric distributions": wandb.Image(f"{output_dir}/metric_distributions_{timestamp}.png"),
@@ -519,7 +516,7 @@ if __name__ == "__main__":
     parser.add_argument('--lr', type=float, default=0.005)
     parser.add_argument('--lr_logz', type=float, default=1e-1)
 
-    parser.add_argument('--n_iterations', type=int, default=300)
+    parser.add_argument('--n_iterations', type=int, default=200)
     parser.add_argument('--n_samples', type=int, default=100)
     parser.add_argument('--top_n', type=int, default=50)
     parser.add_argument('--batch_size', type=int, default=16)

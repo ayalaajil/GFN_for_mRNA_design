@@ -830,3 +830,8 @@ def test_graph(rna: str, energies=None, loop_min=4):
 
     # Draw using draw_rna
     ipynb_draw.draw_struct(rna, structure)
+
+
+if __name__ == "__main__":
+    rna = "AUGGCUACUGAUACUAGCUA"
+    test_graph(rna)

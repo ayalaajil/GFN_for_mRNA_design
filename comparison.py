@@ -43,6 +43,7 @@ def analyze_sequence_properties(
 
         decoded_s = decode_sequence(s)
         lev = levenshtein_distance(decoded_s, decoded_nat)
+
         identity = compute_identity(decoded_s, decoded_nat)
 
         label = labels[i] if labels and i < len(labels) else f"Gen {i+1}"
