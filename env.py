@@ -66,17 +66,6 @@ class CodonDesignEnv(DiscreteEnv):
         w_t = torch.tensor(w, dtype=torch.float32, device=self._device) if not isinstance(w, torch.Tensor) else w.to(self._device)
         self.weights = w_t
 
-    # def set_protein_sequence(self, protein_seq: str):
-    #     """
-    #     Update the protein sequence and recompute necessary structures.
-    #     This allows dynamic protein sequence changes during training.
-    #     """
-    #     self.protein_seq = protein_seq
-    #     self.target_length = len(protein_seq)
-    #     self.seq_length = len(protein_seq)  # For backward compatibility
-    #     self.syn_indices = [get_synonymous_indices(aa) for aa in protein_seq]
-
-
     def step(
         self,
         states,
@@ -188,15 +177,6 @@ class CodonDesignEnv(DiscreteEnv):
             return torch.zeros((0,), device=device, dtype=torch.float32)
 
         return torch.tensor(rewards, device=device, dtype=torch.float32)
-
-    # def log_reward(self, states) -> torch.Tensor:
-    #     """
-    #     Return log of rewards with numerical safety.
-    #     Ensures strictly positive inputs to log to avoid -inf/NaN in training.
-    #     """
-    #     r = self.reward(states)
-    #     r_safe = torch.clamp(r, min=1e-12)
-    #     return torch.log(r_safe)
 
     def is_terminal(self, states: DiscreteStates) -> torch.Tensor:
         states_tensor = states.tensor
