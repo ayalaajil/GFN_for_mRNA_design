@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Evaluate a trained Curriculum Learning GFlowNet model on a set of protein sequences.
 """
@@ -9,7 +8,6 @@ import argparse
 import logging
 from datetime import datetime
 import torch
-import numpy as np
 import wandb
 from tqdm import tqdm
 

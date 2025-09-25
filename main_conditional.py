@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Conditional GFlowNet training script for mRNA design.
 """

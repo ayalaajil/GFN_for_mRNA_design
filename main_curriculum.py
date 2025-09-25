@@ -1,4 +1,3 @@
-# curriculum_mrna_trainer.py
 import sys
 import os
 import argparse

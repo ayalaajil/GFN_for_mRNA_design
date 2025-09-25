@@ -1,9 +1,5 @@
 import math
-from typing import Optional
 import numpy as np
-import torch
-from draw_rna import ipynb_draw
-
 
 def base_as_int(c: str) -> int:
     """Map one character from bases ACGU to an int 0..3"""
@@ -811,27 +807,3 @@ def print_ruler(rna: str):
     for i in range(N):
         print(f"{i % 10:1d}", end="")
     print()
-
-
-def test_graph(rna: str, energies=None, loop_min=4):
-    # Compute a structure
-    f = RNAFolder(energies=energies, loop_min=loop_min)
-
-    s = f.solve(rna)
-    rna = s.rna
-
-    structure = s.as_dots()
-    energy = s.energy()
-
-    print_ruler(rna)
-    print(rna)
-    print(structure)
-    print(f"Free energy: {energy:8.1f}")
-
-    # Draw using draw_rna
-    ipynb_draw.draw_struct(rna, structure)
-
-
-if __name__ == "__main__":
-    rna = "AUGGCUACUGAUACUAGCUA"
-    test_graph(rna)

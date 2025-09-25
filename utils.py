@@ -1,6 +1,3 @@
-from MFE_calculator import RNAFolder
-from CAI_calculator import CAICalculator
-
 import torch
 import torch.nn as nn
 import yaml
@@ -9,19 +6,14 @@ from types import SimpleNamespace
 from typing import List, Dict
 import random
 import os
+import csv
 from datetime import datetime
+
+from MFE_calculator import RNAFolder
+from CAI_calculator import CAICalculator
+
 from torchgfn.src.gfn.modules import ScalarEstimator
 from torchgfn.src.gfn.utils.modules import MLP
-import csv
-
-def set_seed(seed: int = 42):
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
-
 
 # --- Biological Constants ---
 
@@ -141,6 +133,14 @@ def load_config(path: str):
     with open(path, "r") as f:
         cfg_dict = yaml.safe_load(f)
     return SimpleNamespace(**cfg_dict)
+
+def set_seed(seed: int = 42):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
 
 
 def compute_gc_content_vectorized(

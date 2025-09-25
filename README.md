@@ -134,12 +134,8 @@ To run the evaluation experiments, use ```run_evaluation.py```
 - Set seeds with `--seed` (default 42). Scripts call `set_seed` internally.
 - Device is auto-detected (CUDA if available). Override in config if needed.
 
-### 8) Troubleshooting
-- If imports fail on first run, ensure dependencies are installed (NumPy, PyYAML, torch, torchgfn, networkx, etc.).
-- For `torchgfn` submodules, this repo prepends `torchgfn/src` to `sys.path` where needed.
-- For CUDA issues, reinstall PyTorch matching your CUDA toolkit.
 
-### 9) Minimal quickstart
+### 8) Minimal quickstart
 ```bash
 # Setup
 conda env create -f mRNA_env.yml && conda activate mRNA_env
@@ -148,10 +144,10 @@ conda env create -f mRNA_env.yml && conda activate mRNA_env
 python main.py --config_path config.yaml --run_name quick_uncond
 
 # Conditional
-python main_conditional.py --config_path config_small.yaml --run_name quick_cond
+python main_conditional.py --config_path config.yaml --run_name quick_cond
 
 # Curriculum
-python main_curriculum.py --config_path config_small.yaml --run_name quick_curri
+python main_curriculum.py --config_path config.yaml --run_name quick_curri
 ```
 
 
