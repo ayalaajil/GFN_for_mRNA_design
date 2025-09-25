@@ -1,3 +1,4 @@
 wandb/
 torchgfn/
 __pycache__/
+automatic-curriculum/

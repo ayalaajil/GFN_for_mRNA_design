@@ -14,8 +14,9 @@ def evaluate(env, sampler, weights, n_samples=100, conditional=False):
 
     # Sample trajectories
     if conditional:
-        conditioning = weights.detach().clone()
-        conditioning = conditioning.unsqueeze(0).expand(n_samples, *conditioning.shape).to(env.device)
+        # Build conditioning tensor: [weights (3)]
+        conditioning_w = weights.detach().clone()
+        conditioning = conditioning_w.unsqueeze(0).expand(n_samples, *conditioning_w.shape).to(env.device)
         eval_trajectories = sampler.sample_trajectories(env, n=n_samples, conditioning=conditioning)
 
     else:

@@ -6,14 +6,6 @@ import sys
 import os
 sys.path.insert(0,os.path.join(os.path.dirname(__file__), 'torchgfn', 'src'))
 
-from env import CodonDesignEnv
-from preprocessor import CodonSequencePreprocessor
-from train import *
-from evaluate import evaluate
-from plots import *
-from utils import *
-from reward import compute_simple_reward
-from DeepArchi import *
 from datetime import datetime
 import logging
 import torch
@@ -21,15 +13,21 @@ import argparse
 import numpy as np
 import time
 import wandb
-from comparison import analyze_sequence_properties
-from enhanced_comparison import run_comprehensive_analysis
-from simple_generalization import run_simple_generalization_tests
+
+from env import CodonDesignEnv
+from preprocessor import CodonSequencePreprocessor
+from train import *
+from evaluate import evaluate
+from plots import *
+from utils import *
+from reward import compute_simple_reward
+from Architecture import *
+from comparison_utils import run_comprehensive_analysis, analyze_sequence_properties
+
 from torchgfn.src.gfn.gflownet import SubTBGFlowNet
 from torchgfn.src.gfn.modules import DiscretePolicyEstimator, ScalarEstimator
 from torchgfn.src.gfn.utils.modules import MLP
 from torchgfn.src.gfn.samplers import Sampler
-
-from ENN_ENH import MLP_ENN
 
 
 logging.basicConfig(
@@ -70,32 +68,14 @@ def main(args, config):
     logging.info("Creating environment...")
 
     env = CodonDesignEnv(protein_seq=config.protein_seq, device=device)
-    preprocessor = CodonSequencePreprocessor(
-        env.seq_length, embedding_dim=args.embedding_dim, device=device
-    )
+    preprocessor = CodonSequencePreprocessor(env.seq_length, embedding_dim=args.embedding_dim, device=device)
 
     logging.info(f"Protein sequence length: {len(config.protein_seq)}")
     logging.info("Building GFlowNet model...")
 
 
     arch = getattr(config, 'arch', 'MLP')
-
-    if arch == 'MLP_EHH':
-
-            module_PF = MLP_ENN(
-                    input_dim=preprocessor.output_dim,
-                    output_dim=env.n_actions,
-                    hidden_dim=args.hidden_dim,
-                    n_hidden_layers=args.n_hidden,
-                )
-
-            module_PB = MLP_ENN(
-                    input_dim=preprocessor.output_dim,
-                    output_dim=env.n_actions - 1,
-                    hidden_dim=args.hidden_dim,
-                    n_hidden_layers=args.n_hidden,
-                    trunk=module_PF.trunk if args.tied else None,
-                )
+    arch = args.arch if args.arch else arch
 
     if arch == 'Transformer':
 
@@ -395,30 +375,6 @@ def main(args, config):
     wandb.summary["final_loss"] = loss_history[-1]
     wandb.summary["unique_sequences"] = len(unique_seqs)
 
-    if args.run_generalization_tests:
-
-        logging.info("Running generalization tests...")
-        gen_results = run_simple_generalization_tests(
-            env, sampler, device,
-            model_type="unconditional",
-            n_samples=args.generalization_n_samples,
-            output_dir=f"{output_dir}/generalization_tests"
-        )
-
-        if config.wandb_project and gen_results:
-            gc_means = [r['stats']['gc_mean'] for r in gen_results.values()]
-            mfe_means = [r['stats']['mfe_mean'] for r in gen_results.values()]
-            cai_means = [r['stats']['cai_mean'] for r in gen_results.values()]
-            reward_means = [r['stats']['reward_mean'] for r in gen_results.values()]
-
-            wandb.log({
-                "gen_avg_gc": np.mean(gc_means),
-                "gen_avg_mfe": np.mean(mfe_means),
-                "gen_avg_cai": np.mean(cai_means),
-                "gen_avg_reward": np.mean(reward_means),
-                "gen_n_configs": len(gen_results),
-            })
-
     wandb.finish()
     return Eval_avg_reward
 
@@ -432,13 +388,14 @@ if __name__ == "__main__":
     # training-related
     parser.add_argument('--lr', type=float, default=0.005)
     parser.add_argument('--lr_logz', type=float, default=1e-1)
-
+    parser.add_argument('--batch_size', type=int, default=16)
+    parser.add_argument('--arch', type=str, default='Transformer')
     parser.add_argument('--n_iterations', type=int, default=200)
     parser.add_argument('--n_samples', type=int, default=100)
     parser.add_argument('--top_n', type=int, default=50)
-    parser.add_argument('--batch_size', type=int, default=16)
-
     parser.add_argument('--epsilon', type=float, default=0.25)
+
+    # SubTB parameters
     parser.add_argument('--subTB_lambda', type=float, default=0.9)
     parser.add_argument("--subTB_weighting", type=str, default="geometric_within", help="weighting scheme for SubTB")
 

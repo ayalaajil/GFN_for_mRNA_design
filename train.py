@@ -1,6 +1,6 @@
 import numpy as np
+import torch
 from tqdm import tqdm
-from wandb.sdk import wandb_init
 from reward import compute_simple_reward
 import wandb
 import time
@@ -12,7 +12,6 @@ def train_conditional_gfn(args, env, gflownet, sampler, optimizer, scheduler, de
     reward_history = []
     reward_components_history = []
     sampled_weights = []
-
     unique_sequences = set()
 
     for it in (pbar := tqdm(range(args.n_iterations), dynamic_ncols=True)):
@@ -26,8 +25,7 @@ def train_conditional_gfn(args, env, gflownet, sampler, optimizer, scheduler, de
 
         # 2) build conditioning tensor
         weights_tensor = torch.tensor(weights, dtype=torch.get_default_dtype(), device=device)
-        conditioning = weights_tensor
-        conditioning = conditioning.unsqueeze(0).expand(args.batch_size, *conditioning.shape)
+        conditioning = weights_tensor.unsqueeze(0).expand(args.batch_size, -1)
 
         # 3) sample trajectories *with conditioning*
         trajectories = gflownet.sample_trajectories(
@@ -73,9 +71,11 @@ def train_conditional_gfn(args, env, gflownet, sampler, optimizer, scheduler, de
 
         loss_history.append(loss.item())
 
-        # wandb.init(project=args.wandb_project, config=args, name=args.run_name)
+        if args.wandb_project:
 
-        wandb.log(
+            wandb.init(project=args.wandb_project, config=args, name=args.run_name)
+
+            wandb.log(
             {
                 "iteration": it,
                 "loss": loss.item(),
@@ -88,7 +88,7 @@ def train_conditional_gfn(args, env, gflownet, sampler, optimizer, scheduler, de
                 "w_cai": env.weights[2],
                 "iter_time": iter_time,
             }
-        )
+            )
 
     sampled_weights = np.array(sampled_weights)
     return loss_history, reward_history, reward_components_history, unique_sequences, sampled_weights
@@ -117,8 +117,6 @@ def train(args, env, gflownet, sampler, optimizer, scheduler, device):
             env, trajectories, recalculate_all_logprobs=False
         )
 
-        # loss = gflownet.loss(env, trajectories, recalculate_all_logprobs=False)
-
         loss.backward()
         optimizer.step()
         scheduler.step(loss)
@@ -132,9 +130,7 @@ def train(args, env, gflownet, sampler, optimizer, scheduler, device):
         for state in final_states:
 
             state = state.to(device)
-            r, c = compute_simple_reward(
-                state, env.codon_gc_counts, env.weights
-            )  # (gc, mfe, cai)
+            r, c = compute_simple_reward(state, env.codon_gc_counts, env.weights)  # (gc, mfe, cai)
             rewards.append(r)
             components.append(c)
 

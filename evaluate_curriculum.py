@@ -13,27 +13,17 @@ import numpy as np
 import wandb
 from tqdm import tqdm
 
-import sys
-import os
-import argparse
-import logging
-from datetime import datetime
-import torch
-import numpy as np
-import wandb
-from tqdm import tqdm
-
 sys.path.insert(0, os.path.dirname(__file__))
-
 
 from env import CodonDesignEnv
 from preprocessor import CodonSequencePreprocessor2
-from main_conditional import build_subTB_gflownet, load_config
+from main_conditional import build_subTB_gflownet
 from reward import compute_simple_reward
 from utils import *
 from plots import *
-from enhanced_comparison import run_comprehensive_analysis
+from comparison_utils import run_comprehensive_analysis
 from gfn.samplers import Sampler
+
 
 logging.basicConfig(
     level=logging.INFO,
@@ -66,7 +56,6 @@ def evaluate_model_on_task(
     protein_seq: str,
     weights: torch.Tensor,
     args,
-    config,
     device: torch.device,
 ) -> dict:
     """
@@ -76,9 +65,7 @@ def evaluate_model_on_task(
     logging.info(f"Evaluating on protein of length {len(protein_seq)}...")
 
     env = CodonDesignEnv(protein_seq=protein_seq, device=device)
-    preprocessor = CodonSequencePreprocessor2(len(protein_seq) + 50, embedding_dim=args.embedding_dim, device=device)
     sampler = Sampler(estimator=gflownet.pf)
-
     conditioning = weights.unsqueeze(0).expand(args.n_samples, *weights.shape)
 
     with torch.no_grad():
@@ -91,6 +78,7 @@ def evaluate_model_on_task(
     gc_list, mfe_list, cai_list = [], [], []
 
     logging.info(f"Processing {len(final_states)} generated sequences...")
+
     for state in tqdm(final_states, desc="Analyzing sequences"):
         seq_str = "".join([env.idx_to_codon[idx.item()] for idx in state if idx != -1])
         if not seq_str:
@@ -113,55 +101,68 @@ def evaluate_model_on_task(
         "protein_length": len(protein_seq),
     }
 
-def main(args, config):
+def main(args):
+
+    initial_time = datetime.now()
     device = torch.device("cuda") if torch.cuda.is_available() and not args.no_cuda else torch.device("cpu")
     logging.info(f"Using device: {device}")
 
     # --- Setup: Load a dummy environment to build the model ---
     # The protein sequence doesn't matter here, it's just to initialize the model structure.
-
     dummy_protein = "A" * 20
     dummy_env = CodonDesignEnv(protein_seq=dummy_protein, device=device)
     dummy_preprocessor = CodonSequencePreprocessor2(250, embedding_dim=args.embedding_dim, device=device)
 
     gflownet = load_curriculum_model(args.model_path, dummy_env, dummy_preprocessor, args)
 
+    if args.protein_sequences:
+        evaluation_proteins = {}
+        for i in range(len(args.protein_sequences)):
+            seq = args.protein_sequences[i]
+            print(f"Protein sequence: {seq}")
+            evaluation_proteins[f"custom_{i}"] = seq
+    else:
+        evaluation_proteins = {
+            "short_seen": "MINTQDSSILPLSNCPQLQCCRHIVPGPLWCS*", # Length 32 (in curriculum)
+            "medium_unseen": "MKLVRFLMKLSHETVTIELKNGTQVHGTITGVDVSMNTHLKAVKMTLKNREPVQLETLSIRGNNIRYFILPDSLPLDTLLVDVEPKVKSKKREAVAGRGRGRGRGRGRGRGRGRGGPRR*", # Length 120 (unseen)
+            "long_seen": "MGASARLLRAVIMGAPGSGKGTVSSRITTHFELKHLSSGDLLRDNMLRGTEIGVLAKAFIDQGKLIPDDVMTRLALHELKNLTQYSWLLDGFPRTLPQAEALDRAYQIDTVINLNVPFEVIKQRLTARWIHPASGRVYNIEFNPPKTVGIDDLTGEPLIQREDDKPETVIKRLKAYEDQTKPVLEYYQKKGVLETFSGTETNKIWPYVYAFLQTKVPQRSQKASVTP*" # Length 228 (in curriculum)
+        }
 
-    # Include proteins of lengths seen during training AND some it has NOT seen.
-    evaluation_proteins = {
-        "short_seen": "MINTQDSSILPLSNCPQLQCCRHIVPGPLWCS*", # Length 32 (in curriculum)
-        "medium_unseen": "MKLVRFLMKLSHETVTIELKNGTQVHGTITGVDVSMNTHLKAVKMTLKNREPVQLETLSIRGNNIRYFILPDSLPLDTLLVDVEPKVKSKKREAVAGRGRGRGRGRGRGRGRGRGGPRR*", # Length 120 (unseen)
-        "long_seen": "MGASARLLRAVIMGAPGSGKGTVSSRITTHFELKHLSSGDLLRDNMLRGTEIGVLAKAFIDQGKLIPDDVMTRLALHELKNLTQYSWLLDGFPRTLPQAEALDRAYQIDTVINLNVPFEVIKQRLTARWIHPASGRVYNIEFNPPKTVGIDDLTGEPLIQREDDKPETVIKRLKAYEDQTKPVLEYYQKKGVLETFSGTETNKIWPYVYAFLQTKVPQRSQKASVTP*" # Length 228 (in curriculum)
-    }
-
-    natural_mRNA_sequences = {
+    if args.natural_mRNA_sequences:
+        natural_mRNA_sequences = {}
+        for i in range(len(args.natural_mRNA_sequences)):
+            seq = args.natural_mRNA_sequences[i]
+            print(f"Natural mRNA sequence: {seq}")
+            natural_mRNA_sequences[f"custom_{i}"] = seq
+    else:
+        natural_mRNA_sequences = {
         "short_seen": "AUGAUAAACACCCAGGACAGUAGUAUUUUGCCUUUGAGUAACUGUCCCCAGCUCCAGUGCUGCAGGCACAUUGUUCCAGGGCCUCUGUGGUGCUCCUAA",
         "medium_unseen": "AUGAAGCUCGUGAGAUUUUUGAUGAAAUUGAGUCAUGAAACUGUAACCAUUGAAUUGAAGAACGGAACACAGGUCCAUGGAACAAUCACAGGUGUGGAUGUCAGCAUGAAUACACAUCUUAAAGCUGUGAAAAUGACCCUGAAGAACAGAGAACCUGUACAGCUGGAAACGCUGAGUAUUCGAGGAAAUAACAUUCGGUAUUUUAUUCUACCAGACAGUUUACCUCUGGAUACACUACUUGUGGAUGUUGAACCUAAGGUGAAAUCUAAGAAAAGGGAAGCUGUUGCAGGAAGAGGCAGAGGAAGAGGAAGAGGAAGAGGACGUGGCCGUGGCAGAGGAAGAGGGGGUCCUAGGCGAUAA",
         "long_seen": "AUGGGGGCGUCCGCGCGGCUGCUGCGAGCGGUGAUCAUGGGGGCCCCGGGCUCGGGCAAGGGCACCGUGUCGUCGCGCAUCACUACACACUUCGAGCUGAAGCACCUCUCCAGCGGGGACCUGCUCCGGGACAACAUGCUGCGGGGCACAGAAAUUGGCGUGUUAGCCAAGGCUUUCAUUGACCAAGGGAAACUCAUCCCAGAUGAUGUCAUGACUCGGCUGGCCCUUCAUGAGCUGAAAAAUCUCACCCAGUAUAGCUGGCUGUUGGAUGGUUUUCCAAGGACACUUCCACAGGCAGAAGCCCUAGAUAGAGCUUAUCAGAUCGACACAGUGAUUAACCUGAAUGUGCCCUUUGAGGUCAUUAAACAACGCCUUACUGCUCGCUGGAUUCAUCCCGCCAGUGGCCGAGUCUAUAACAUUGAAUUCAACCCUCCCAAAACUGUGGGCAUUGAUGACCUGACUGGGGAGCCUCUCAUUCAGCGUGAGGAUGAUAAACCAGAGACGGUUAUCAAGAGACUAAAGGCUUAUGAAGACCAAACAAAGCCAGUCCUGGAAUAUUACCAGAAAAAAGGGGUGCUGGAAACAUUCUCCGGAACAGAAACCAACAAGAUUUGGCCCUAUGUAUAUGCUUUCCUACAAACUAAAGUUCCACAAAGAAGCCAGAAAGCUUCAGUUACUCCAUGA",
     }
 
-
-    if config.wandb_project:
+    if args.wandb_project:
         run_name = args.run_name or f"eval_curriculum_{datetime.now().strftime('%Y%m%d_%H%M')}"
         wandb.init(
-            project=config.wandb_project,
-            config={**vars(args), **vars(config)},
+            project=args.wandb_project,
+            config={**vars(args)},
             name=run_name,
             group="Curriculum Evaluation",
             tags=['evaluation', 'curriculum']
         )
 
-    # --- Run Evaluation for each task ---
     for task_name, protein_seq in evaluation_proteins.items():
 
         logging.info(f"\n{'='*20} Starting Evaluation for Task: {task_name} {'='*20}")
+        logging.info(f"Protein sequence: {protein_seq}")
 
-        eval_weights = torch.tensor([0.3, 0.3, 0.4], device=device)
+        eval_weights = torch.tensor([0.3, 0.3, 0.4], device=device)  # weights for the reward function
 
-        task_results = evaluate_model_on_task(gflownet, protein_seq, eval_weights, args, config, device)
+        task_results = evaluate_model_on_task(gflownet, protein_seq, eval_weights, args, device)
 
         timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M")
-        output_dir = f"outputs/curriculum_evaluation/{task_name}_{timestamp}"
+
+        output_dir = f"EXPERIMENTS/PAPERS/CAGFN/{task_name}_{timestamp}"
         os.makedirs(output_dir, exist_ok=True)
 
 
@@ -177,10 +178,10 @@ def main(args, config):
             top_n=args.top_n
         )
 
-
-        if config.wandb_project:
+        end_time = datetime.now()
+        time_taken = end_time - initial_time
+        if args.wandb_project:
             logging.info(f"Logging results for task '{task_name}' to WandB...")
-
 
             table = wandb.Table(columns=["Sequence", "Reward", "GC", "MFE", "CAI"])
             sorted_samples = sorted(task_results['samples'].items(), key=lambda x: x[1][0], reverse=True)
@@ -189,6 +190,7 @@ def main(args, config):
 
             wandb.log({
                 f"{task_name}/protein_length": task_results["protein_length"],
+                f"{task_name}/time_taken": time_taken.total_seconds(),
                 f"{task_name}/Top_Sequences": table,
                 f"{task_name}/pareto_plot": wandb.Image(analysis_results['plot_path']),
                 f"{task_name}/reward_mean": analysis_results['quality_metrics']['reward_stats']['mean'],
@@ -198,7 +200,7 @@ def main(args, config):
                 f"{task_name}/uniqueness_ratio": analysis_results['diversity_metrics']['uniqueness_ratio'],
             })
 
-    if config.wandb_project:
+    if args.wandb_project:
         wandb.finish()
 
     logging.info("Evaluation complete.")
@@ -209,10 +211,14 @@ if __name__ == "__main__":
 
     # --- Essential Arguments ---
     parser.add_argument("--model_path", type=str, required=True, help="Path to the saved .pth model file from curriculum training.")
-    parser.add_argument("--config_path", type=str, default="config.yaml", help="Path to the configuration file (for protein sequences, wandb project, etc.).")
     parser.add_argument('--run_name', type=str, default='', help='Name for this evaluation run in WandB.')
+    parser.add_argument('--wandb_project', type=str, default='EVALUATION_Experiments', help='WandB project name.')
 
-    # --- Model Architecture Arguments (MUST MATCH TRAINING) ---
+    # --- Custom Protein and mRNA Sequences ---
+    parser.add_argument('--protein_sequences', nargs='*', help='Custom protein sequences to evaluate (space-separated). If not provided, uses default sequences.')
+    parser.add_argument('--natural_mRNA_sequences', nargs='*', help='Custom natural mRNA sequences to evaluate (space-separated). If not provided, uses default sequences.')
+
+    # --- Model Architecture Arguments ---
     parser.add_argument('--embedding_dim', type=int, default=32)
     parser.add_argument('--hidden_dim', type=int, default=256)
     parser.add_argument('--n_hidden', type=int, default=4)
@@ -221,11 +227,10 @@ if __name__ == "__main__":
     parser.add_argument('--tied', action='store_true', help="Whether the policy networks were tied during training.")
 
     # --- Evaluation Parameters ---
-    parser.add_argument('--n_samples', type=int, default=200, help="Number of sequences to generate for evaluation.")
+    parser.add_argument('--n_samples', type=int, default=100, help="Number of sequences to generate for evaluation.")
     parser.add_argument('--top_n', type=int, default=50, help="Number of top sequences to use for diversity analysis.")
     parser.add_argument("--no_cuda", action="store_true", help="Disable CUDA, run on CPU.")
 
     args = parser.parse_args()
-    config = load_config(args.config_path)
 
-    main(args, config)
+    main(args)

@@ -2,14 +2,13 @@
 """
 Conditional GFlowNet training script for mRNA design.
 """
-
 import sys
 import os
 import time
 import logging
 import argparse
 from datetime import datetime
-from typing import Dict, Any, Tuple, List
+from typing import Tuple
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'torchgfn', 'src'))
 
@@ -17,9 +16,8 @@ import torch
 import numpy as np
 import wandb
 from reward import compute_simple_reward
-from DeepArchi import *
-from comparison import analyze_sequence_properties
-from enhanced_comparison import run_comprehensive_analysis
+from Architecture import *
+from comparison_utils import run_comprehensive_analysis, analyze_sequence_properties
 from utils import *
 from plots import *
 from env import CodonDesignEnv
@@ -34,7 +32,6 @@ from gfn.estimators import (
     ScalarEstimator,
 )
 from gfn.utils.modules import MLP
-from ENN_ENH import MLP_ENN
 from gfn.samplers import Sampler
 
 
@@ -98,23 +95,6 @@ def build_tb_gflownet(env, pf_estimator, pb_estimator, preprocessor, cond_dim: i
 def build_conditional_pf_pb(env, preprocessor, args) -> Tuple[ConditionalDiscretePolicyEstimator, ConditionalDiscretePolicyEstimator]:
 
     CONCAT_SIZE = 64
-
-    if args.arch == 'MLP_EHH':
-
-            module_PF = MLP_ENN(
-                    input_dim=preprocessor.output_dim,
-                    output_dim=CONCAT_SIZE,
-                    hidden_dim=args.hidden_dim,
-                    n_hidden_layers=args.n_hidden,
-                )
-
-            module_PB = MLP_ENN(
-                    input_dim=preprocessor.output_dim,
-                    output_dim=CONCAT_SIZE,
-                    hidden_dim=args.hidden_dim,
-                    n_hidden_layers=args.n_hidden,
-                    trunk=module_PF.trunk if args.tied else None,
-                )
 
     if args.arch == 'Transformer':
 
@@ -357,8 +337,6 @@ def main(args, config):
 
     plot_metric_histograms(gc_list, mfe_list, cai_list, out_path=f"{output_dir}/metric_distributions_{timestamp}.png")
     plot_pareto_front(gc_list, mfe_list, cai_list, out_path=f"{output_dir}/pareto_scatter_{timestamp}.png")
-    plot_cai_vs_mfe(cai_list, mfe_list, out_path=f"{output_dir}/cai_vs_mfe_{timestamp}.png")
-    plot_gc_vs_mfe(gc_list, mfe_list, out_path=f"{output_dir}/gc_vs_mfe_{timestamp}.png")
 
     filename = f"{output_dir}/generated_sequences_{timestamp}.txt"
 
@@ -477,24 +455,12 @@ def main(args, config):
                 "Avg_time_per_sequence": avg_time_per_seq,
                 "Reward Metric distributions": wandb.Image(f"{output_dir}/metric_distributions_{timestamp}.png"),
                 "edit_distance_distribution": wandb.Image(f"{output_dir}/edit_distance_distribution_{timestamp}.png"),
-                "CAI vs MFE": wandb.Image(f"{output_dir}/cai_vs_mfe_{timestamp}.png"),
-                "GC vs MFE": wandb.Image(f"{output_dir}/gc_vs_mfe_{timestamp}.png"),
                 "mean_edit_distance": np.mean(distances),
                 "std_edit_distance": np.std(distances),
                 "Eval_mean_gc": eval_mean_gc,
                 "Eval_mean_mfe": eval_mean_mfe,
                 "Eval_mean_cai": eval_mean_cai,
-                "Eval_avg_reward": Eval_avg_reward,
-
-
-                # Enhanced diversity and quality metrics
-                "diversity_mean_edit_distance": analysis_results['diversity_metrics']['mean_edit_distance'],
-                "diversity_std_edit_distance": analysis_results['diversity_metrics']['std_edit_distance'],
-                "diversity_unique_sequences": analysis_results['diversity_metrics']['unique_sequences'],
-                "diversity_uniqueness_ratio": analysis_results['diversity_metrics']['uniqueness_ratio'],
-                "quality_pareto_efficiency": analysis_results['quality_metrics']['pareto_efficiency'],
-                "quality_reward_mean": analysis_results['quality_metrics']['reward_stats']['mean'],
-                "Enhanced Diversity Analysis": wandb.Image(analysis_results['plot_path']),
+                "Eval_avg_reward": Eval_avg_reward
             }
         )
 
@@ -511,15 +477,13 @@ if __name__ == "__main__":
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
 
     parser.add_argument('--arch', type=str, default='Transformer')
-
-    # training-related
     parser.add_argument('--lr', type=float, default=0.005)
-    parser.add_argument('--lr_logz', type=float, default=1e-1)
+    parser.add_argument('--lr_logz', type=float, default=0.01)
 
     parser.add_argument('--n_iterations', type=int, default=200)
     parser.add_argument('--n_samples', type=int, default=100)
     parser.add_argument('--top_n', type=int, default=50)
-    parser.add_argument('--batch_size', type=int, default=16)
+    parser.add_argument('--batch_size', type=int, default=64)
 
     parser.add_argument('--epsilon', type=float, default=0.25)
     parser.add_argument('--subTB_lambda', type=float, default=0.9)
@@ -540,33 +504,3 @@ if __name__ == "__main__":
     config = load_config(args.config_path)
 
     main(args, config)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-############################### Comparison between configs ##############################
-
-# weight_configs = {
-# "GC_only": [1.0, 0.0, 0.0],
-# "MFE_only": [0.0, 1.0, 0.0],
-# "CAI_only": [0.0, 0.0, 1.0],
-# "MFE+CAI": [0.0, 0.5, 0.5],
-# "MFE+CAI+GC":[0.3, 0.3, 0.4]
-# }
-# all_results = sweep_weight_configs(env, sampler, weight_configs, n_samples=50)
-# plot_sweep_results(csv_path="sweep_results.csv")
-
-#############################################################################################

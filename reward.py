@@ -1,5 +1,4 @@
 from typing import Tuple, Sequence, Dict
-import torch
 from utils import compute_gc_content_vectorized, compute_mfe_energy, compute_cai
 
 

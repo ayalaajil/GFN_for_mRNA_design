@@ -189,6 +189,15 @@ class CodonDesignEnv(DiscreteEnv):
 
         return torch.tensor(rewards, device=device, dtype=torch.float32)
 
+    # def log_reward(self, states) -> torch.Tensor:
+    #     """
+    #     Return log of rewards with numerical safety.
+    #     Ensures strictly positive inputs to log to avoid -inf/NaN in training.
+    #     """
+    #     r = self.reward(states)
+    #     r_safe = torch.clamp(r, min=1e-12)
+    #     return torch.log(r_safe)
+
     def is_terminal(self, states: DiscreteStates) -> torch.Tensor:
         states_tensor = states.tensor
         return ((states_tensor != -1).sum(dim=1) == self.seq_length).bool()

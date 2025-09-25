@@ -1,6 +1,8 @@
 from MFE_calculator import RNAFolder
 from CAI_calculator import CAICalculator
+
 import torch
+import torch.nn as nn
 import yaml
 import numpy as np
 from types import SimpleNamespace
@@ -10,8 +12,7 @@ import os
 from datetime import datetime
 from torchgfn.src.gfn.modules import ScalarEstimator
 from torchgfn.src.gfn.utils.modules import MLP
-
-
+import csv
 
 def set_seed(seed: int = 42):
     random.seed(seed)
@@ -27,7 +28,7 @@ def set_seed(seed: int = 42):
 # Stop codons
 STOP_CODONS: List[str] = ["UAA", "UAG", "UGA"]
 
-# Codon table mapping amino acids (or stop *) to codons, example of protein sequence : ACDEFGHIKLMNPQ
+# Codon table mapping amino acids (or stop *) to codons
 CODON_TABLE: Dict[str, List[str]] = {
     "A": ["GCU", "GCC", "GCA", "GCG"],
     "C": ["UGU", "UGC"],
@@ -51,7 +52,6 @@ CODON_TABLE: Dict[str, List[str]] = {
     "Y": ["UAU", "UAC"],
     "*": ["UAA", "UAG", "UGA"],  # Stop codons
 }
-
 
 # Amino acid list
 AA_LIST: List[str] = list(CODON_TABLE.keys())
@@ -187,7 +187,7 @@ def compute_cai(indices: torch.Tensor, energies=None, loop_min=4) -> torch.Tenso
         score = calc.compute_cai()
     except Exception as e:
         score = 0
-        
+
     cai_scores.append(score)
     return torch.tensor(cai_scores, dtype=torch.float32).to(device)
 
@@ -264,25 +264,92 @@ def set_up_logF_estimator(
 
     return ScalarEstimator(module=module, preprocessor=preprocessor)
 
-
-
 # ----------------------------- Protein Sequence Encoding ----------------------------
 def encode_protein_sequence(protein_seq: str, device: torch.device) -> torch.Tensor:
+    """Return a learned fixed-length embedding for the protein sequence.
 
-    # Amino acid to index mapping
-    aa_to_idx = {
-        'A': 0, 'C': 1, 'D': 2, 'E': 3, 'F': 4, 'G': 5, 'H': 6, 'I': 7,
-        'K': 8, 'L': 9, 'M': 10, 'N': 11, 'P': 12, 'Q': 13, 'R': 14,
-        'S': 15, 'T': 16, 'V': 17, 'W': 18, 'Y': 19, '*': 20
+    Uses a lightweight learnable embedding + MLP pooled over residues.
+    Keeps the public API unchanged: returns a 1D tensor on the given device.
+    """
+    conditioner = get_protein_conditioner(device=device)
+    return conditioner(protein_seq, device)
+
+
+# ---- Learnable Protein Conditioner (singleton) ----
+_AA_TO_IDX = {
+    'A': 0, 'C': 1, 'D': 2, 'E': 3, 'F': 4, 'G': 5, 'H': 6, 'I': 7,
+    'K': 8, 'L': 9, 'M': 10, 'N': 11, 'P': 12, 'Q': 13, 'R': 14,
+    'S': 15, 'T': 16, 'V': 17, 'W': 18, 'Y': 19, '*': 20
+}
+_PROT_CONDITIONER = None
+
+
+class ProteinConditioner(nn.Module):
+    def __init__(self, d_embed: int = 32, prot_out_dim: int = 32):
+        super().__init__()
+        self.embedding = nn.Embedding(21, d_embed)
+        self.proj = nn.Sequential(
+            nn.LayerNorm(d_embed),
+            nn.Linear(d_embed, 2 * d_embed),
+            nn.GELU(),
+            nn.Linear(2 * d_embed, prot_out_dim),
+        )
+
+    def forward(self, seq: str, device: torch.device) -> torch.Tensor:
+        idxs = torch.tensor([
+            _AA_TO_IDX[a] for a in seq if a in _AA_TO_IDX
+        ], device=device, dtype=torch.long)
+        if idxs.numel() == 0:
+            # Fallback: zero vector if sequence is empty or invalid
+            return torch.zeros(self.proj[-1].out_features, device=device)
+        emb = self.embedding(idxs)  # [L, d]
+        pooled = emb.mean(dim=0)    # [d]
+        return self.proj(pooled)    # [prot_out_dim]
+
+
+def get_protein_conditioner(
+    d_embed: int = 32,
+    prot_out_dim: int = 32,
+    device: torch.device = torch.device("cpu"),
+) -> ProteinConditioner:
+    """Returns a global ProteinConditioner instance on the given device."""
+    global _PROT_CONDITIONER
+    if _PROT_CONDITIONER is None:
+        _PROT_CONDITIONER = ProteinConditioner(d_embed=d_embed, prot_out_dim=prot_out_dim).to(device)
+    else:
+        # Move to the requested device if needed
+        if next(_PROT_CONDITIONER.parameters()).device != device:
+            _PROT_CONDITIONER = _PROT_CONDITIONER.to(device)
+    return _PROT_CONDITIONER
+
+def get_target_from_csv(csv_path: str, row: int = 0) -> Dict[str, str]:
+    """Load a single training target from a CSV file.
+
+    Expected columns: protein_sequence, mrna_sequence
+    Returns dict with keys: protein_seq, reference_codon_seq, include_stop (bool)
+    If protein_sequence ends with '*', the '*' is stripped and include_stop=True.
+    """
+    if not os.path.exists(csv_path):
+        raise FileNotFoundError(csv_path)
+    with open(csv_path, newline="") as f:
+        reader = csv.DictReader(f)
+        rows = list(reader)
+    if row < 0 or row >= len(rows):
+        raise IndexError(f"Row {row} out of range for {csv_path} (n={len(rows)})")
+    r = rows[row]
+    prot = (r.get("protein_sequence") or r.get("protein") or "").strip()
+    if prot == "":
+        raise ValueError("CSV missing 'protein_sequence' column or value")
+    include_stop = prot.endswith("*")
+    if include_stop:
+        prot = prot[:-1]
+    mrna = (r.get("mrna_sequence") or r.get("mrna") or "").strip()
+    if mrna == "":
+        raise ValueError("CSV missing 'mrna_sequence' column or value")
+    codon_tokens = tokenize_sequence_to_tensor(mrna)
+    return {
+        "protein_seq": prot,
+        "reference_codon_seq": codon_tokens,
+        "include_stop": include_stop,
     }
-
-    one_hot_seq = torch.zeros(21, device=device)  # 20 amino acids + stop codon
-
-    for aa in protein_seq:
-        if aa in aa_to_idx:
-            idx = aa_to_idx[aa]
-            one_hot_seq[idx] = 1.0
-
-
-    return one_hot_seq
 
