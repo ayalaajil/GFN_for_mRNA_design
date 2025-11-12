@@ -150,4 +150,15 @@ python main_conditional.py --config_path config.yaml --run_name quick_cond
 python main_curriculum.py --config_path config.yaml --run_name quick_curri
 ```
 
+If you use this repository or find it helpful in your research, please cite:
+
+@article{laajil2025curriculum,
+  title={Curriculum-Augmented GFlowNets For mRNA Sequence Generation},
+  author={Laajil, Aya and Shtanchaev, Ayan and Muhammad, Saif and Moulines, Éric and Lahlou, Salem},
+  journal={arXiv preprint arXiv:2510.03811},
+  year={2025},
+  url={https://arxiv.org/abs/2510.03811}
+}
+
+
 
