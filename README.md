@@ -156,7 +156,7 @@ If you use this repository or find it helpful in your research, please cite:
 ```bash
 @article{laajil2025curriculum,
   title={Curriculum-Augmented GFlowNets For mRNA Sequence Generation},
-  author={Laajil, Aya and Shtanchaev, Ayan and Muhammad, Saif and Moulines, Éric and Lahlou, Salem},
+  author={Laajil, A., Shtanchaev, A., Muhammad, S., Moulines, E., & Lahlou, S},
   journal={arXiv preprint arXiv:2510.03811},
   year={2025},
   url={https://arxiv.org/abs/2510.03811}
